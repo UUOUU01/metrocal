@@ -1,8 +1,8 @@
-//! Metro 配色。Metro palette.（渲染层无关，供 Skia 使用）
+//! Metro palette. (Render-layer agnostic; consumed by the Skia drawing code.)
 //!
-//! 绘制处用 `skc(color, alpha)` 把 `Color32` 转为 `skia_safe::Color`。
+//! Drawing code converts `Color32` to `skia_safe::Color` via `skc(color, alpha)`.
 
-/// 简单 RGB 颜色（不含 alpha；alpha 在绘制处按动画参数即时给定）。
+/// Simple RGB color (no alpha; alpha is supplied at draw time from animation state).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Color32(pub u8, pub u8, pub u8);
 
@@ -44,16 +44,16 @@ impl Theme {
     }
 }
 
-/// 经典 Metro / Windows Phone 纯色盘。
+/// Classic Metro / Windows Phone solid color palette.
 pub const ACCENTS: [Color32; 8] = [
-    Color32::from_rgb(0x00, 0x78, 0xD4), // 蓝 Cobalt
-    Color32::from_rgb(0x00, 0xAB, 0xA9), // 青 Teal
-    Color32::from_rgb(0x10, 0x7C, 0x10), // 绿 Green
-    Color32::from_rgb(0xC2, 0x39, 0xB3), // 紫 Purple
-    Color32::from_rgb(0xFF, 0x00, 0x97), // 品红 Magenta
-    Color32::from_rgb(0xF7, 0x63, 0x0C), // 橙 Orange
-    Color32::from_rgb(0xE8, 0x11, 0x23), // 红 Red
-    Color32::from_rgb(0x6B, 0x69, 0xD6), // 靛 Indigo
+    Color32::from_rgb(0x00, 0x78, 0xD4), // Cobalt
+    Color32::from_rgb(0x00, 0xAB, 0xA9), // Teal
+    Color32::from_rgb(0x10, 0x7C, 0x10), // Green
+    Color32::from_rgb(0xC2, 0x39, 0xB3), // Purple
+    Color32::from_rgb(0xFF, 0x00, 0x97), // Magenta
+    Color32::from_rgb(0xF7, 0x63, 0x0C), // Orange
+    Color32::from_rgb(0xE8, 0x11, 0x23), // Red
+    Color32::from_rgb(0x6B, 0x69, 0xD6), // Indigo
 ];
 
 #[derive(Clone, Copy, Debug)]

@@ -1,4 +1,4 @@
-//! Metro 计算器 · Metro Calculator
+//! Metro Calculator
 //!
 //! Memory safety: the crate is compiled with `#![deny(unsafe_code)]`. The
 //! single exception is `gl_context.rs`, which contains two audited FFI
@@ -38,7 +38,7 @@ fn main() {
         return;
     }
 
-    // 生成多尺寸透明 .ico（发布打包用）：metro-calculator.exe --gen-icon [路径]
+    // Generate a multi-size transparent .ico (for release packaging): metro-calculator.exe --gen-icon [path]
     if let Some(pos) = args.iter().position(|a| a == "--gen-icon") {
         let path = args.get(pos + 1).cloned().unwrap_or_else(|| "metro.ico".to_owned());
         match icon::write_ico(std::path::Path::new(&path)) {

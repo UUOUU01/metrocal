@@ -1,4 +1,3 @@
-//! 本地化：简体中文 / English / Français。
 //! Localization: simplified Chinese / English / French.
 
 use crate::engine::num_to_string;
@@ -84,7 +83,7 @@ pub struct Strings {
     pub about_line: &'static str,
     pub safety_line: &'static str,
     pub version_title: &'static str,
-    // Windows 8 开始屏幕
+    // Windows 8 start screen
     pub g_apps: &'static str,
     pub g_personal: &'static str,
     pub g_data: &'static str,
@@ -376,7 +375,8 @@ pub fn localize_number(s: &str, lang: Lang) -> String {
 }
 
 /// Format a value for display, localized.
-/// 极大/极小值用科学计数法显示（仅显示层；entry/历史永远是纯数字格式）。
+/// Very large/small values use scientific notation (display layer only;
+/// entry/history always stay in plain number format).
 pub fn fmt_value(v: f64, lang: Lang) -> String {
     let a = v.abs();
     if a >= 1e16 || (v != 0.0 && a < 1e-6) {

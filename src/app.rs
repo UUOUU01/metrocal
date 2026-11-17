@@ -1,8 +1,9 @@
-//! UI 层：Metro 磁贴、动画、页面、持久化。100% safe Rust。
-//! 渲染：Skia GPU（OpenGL）优先，CPU 光栅兜底；绘制代码两者共用。
+//! UI layer: Metro tiles, animations, pages, persistence. 100% safe Rust.
+//! Rendering: Skia GPU (OpenGL) preferred, CPU raster fallback; both paths share the same drawing code.
 //!
-//! Windows 8 开始屏幕为蓝本：全屏彩色磁贴网格、分组、白色极简矢量图标、
-//! 渐进式分批入场、动态磁贴翻转（Skia 变换矩阵 2D 轻量翻转）。
+//! Modeled on the Windows 8 start screen: full-screen colorful tile grid, groups,
+//! minimal white vector icons, progressive staggered entrance, live tile flip
+//! (lightweight 2D flip via Skia transform matrices).
 
 use std::collections::HashMap;
 use std::ffi::CString;
@@ -122,7 +123,7 @@ enum HitAct {
     Exit,
 }
 
-/// Windows 8 开始屏幕磁贴的白色极简图标（矢量绘制）。
+/// Minimal white vector icons for Windows 8 start-screen tiles (vector drawn).
 #[derive(Clone, Copy, Debug)]
 enum Glyph {
     Calculator,
@@ -135,9 +136,9 @@ enum Glyph {
     Power,
 }
 
-/// 开始屏幕磁贴定义。
+/// Start-screen tile definition.
 struct StartTileDef {
-    /// 占几列（1 = 小磁贴，2 = Win8 大磁贴，占满 2×2）
+    /// Column span (1 = small tile, 2 = Win8 large tile filling 2×2)
     span: u32,
     glyph: Glyph,
     label: &'static str,
@@ -191,7 +192,7 @@ enum TextAlign {
     Right,
 }
 
-// ---------- 绘制命令帧（与状态解耦，规避借用冲突） ----------
+// ---------- draw-command frame (decoupled from state to avoid borrow conflicts) ----------
 
 enum Cmd {
     FillRect(Rect, skia_safe::Color),
@@ -321,7 +322,7 @@ fn rect_center(r: Rect) -> (f32, f32) {
     (r.center_x(), r.center_y())
 }
 
-/// 磁贴单元尺寸（以行高为基准）。
+/// Tile unit size (based on row height).
 fn u_size(rect: Rect) -> f32 {
     rect.height()
 }
@@ -494,17 +495,17 @@ impl MetroCalcApp {
         theme::pal(self.theme, self.accent_idx)
     }
 
-    /// 顶栏高度随窗口比例缩放。
+    /// Top bar height scales with the window.
     fn top_h(&self) -> f32 {
         58.0 * self.ui_scale
     }
 
-    /// 字号/尺寸按窗口比例缩放（全屏时撑开，不缩在角落）。
+    /// Font sizes / dimensions scale with the window (expand fullscreen, never shrink into a corner).
     fn fs(&self, v: f32) -> f32 {
         v * self.ui_scale
     }
 
-    /// 开始屏幕磁贴网格的可视高度（标题区以下）。
+    /// Visible height of the start-screen tile grid (below the title area).
     fn start_view_h(&self) -> f32 {
         (self.lh - self.top_h() - self.fs(150.0)).max(0.0)
     }
@@ -529,7 +530,7 @@ impl MetroCalcApp {
         if self.page == page && self.page_switch.is_none() {
             return;
         }
-        self.focus = None; // 换页时清除键盘焦点
+        self.focus = None; // clear keyboard focus on page switch
         self.page_switch = Some((now, self.page_current(), page));
         self.dirty = true;
     }
@@ -582,7 +583,7 @@ impl MetroCalcApp {
             }
         }
         if self.engine.error.is_some() && self.prev_error.is_none() {
-            self.shake = Some(now); // 仅视觉抖动提示
+            self.shake = Some(now); // visual-only shake feedback
         }
         self.prev_error = self.engine.error;
         self.prev_value = newv;
@@ -670,8 +671,8 @@ impl MetroCalcApp {
             return;
         }
         let on_calc = self.page_current() == Page::Calc;
-        // 键盘焦点导航（可访问性）：Tab/Shift+Tab 循环，方向键按网格移动，
-        // 空格/Enter 激活焦点按键；焦点环始终可见。
+        // Keyboard focus navigation (accessibility): Tab/Shift+Tab cycle, arrow keys
+        // move focus by grid, Space/Enter activate the focused key; focus ring always visible.
         let n_tiles = self.tile_specs().len();
         let move_focus = |focus: &mut Option<usize>, delta: isize, wrap: bool| {
             *focus = Some(match *focus {
@@ -914,7 +915,7 @@ impl MetroCalcApp {
         self.set_scroll = self
             .set_scroll
             .clamp(0.0, (self.set_content_h - view_h).max(0.0));
-        // 计算器键盘固定两列：12 行放不下时才允许纵向滚动（边界防御）
+        // Calculator keypad is fixed at two columns: vertical scrolling only when 12 rows don't fit (defensive)
         let rows_n = 12.0f32;
         let grid_avail =
             (self.lh - self.top_h() - self.fs(8.0) - 120.0 - self.fs(12.0)).max(0.0);
@@ -960,14 +961,14 @@ impl MetroCalcApp {
         if self.page_switch.is_some() {
             return true;
         }
-        // Start 屏幕的动态磁贴翻转（每 5 秒翻 0.6 秒）
+        // Live tile flip on the Start screen (every 5s, flip lasts 0.6s)
         if self.page_current() == Page::Start {
             let phase = now.duration_since(self.t0).as_secs_f32() % 5.0;
             if phase < 0.75 {
                 return true;
             }
         }
-        // 渐进式入场（标题 → 分组 → 磁贴分批浮现）
+        // Progressive entrance (title → groups → tiles appear in batches)
         if now.duration_since(self.entrance_start) < Duration::from_secs_f32(1.8) {
             return true;
         }
@@ -1035,8 +1036,9 @@ impl MetroCalcApp {
         self.build_top_bar(&mut fr, &pal, lw, now);
         self.build_history(&mut fr, &pal, lw, lh);
         self.build_splash(&mut fr, &pal, lw, lh, now);
-        // 页面滑动过渡期间锁定页面命中区域：
-        // 两页内容同时在移动，此时点击应只命中顶栏/开始遮罩，避免点到看不见的磁贴
+        // Lock page hit regions during the slide transition:
+        // both pages are moving at once, so clicks should only hit the top bar /
+        // start overlay, avoiding invisible tiles
         if self.page_switch.is_some() {
             fr.regions
                 .retain(|r| matches!(r.key, HitKey::Bar(_) | HitKey::SplashSkip));
@@ -1062,13 +1064,13 @@ impl MetroCalcApp {
         }
     }
 
-    // ---------- Windows 8 开始屏幕 ----------
+    // ---------- Windows 8 start screen ----------
 
     fn build_start(&mut self, fr: &mut Frame, pal: &Palette, lw: f32, lh: f32, now: Instant) {
         let s = i18n::strings(self.lang);
         let elapsed = now.duration_since(self.entrance_start).as_secs_f32();
 
-        // 大字号扁平标题（先出框架）
+        // Large flat title (framework appears first)
         let hp = theme::ease_out((elapsed - 0.55) / 0.40);
         if hp > 0.01 {
             let y = self.top_h() + self.fs(56.0) + (1.0 - hp) * self.fs(18.0);
@@ -1087,14 +1089,15 @@ impl MetroCalcApp {
             ));
         }
 
-        // 上下两列磁贴网格（Windows Phone 式）：两列并排、自上而下堆叠、纵向滚动；
-        // 计算器大磁贴占满整行（跨两列），其余磁贴两两成行
+        // Two-column tile grid (Windows Phone style): columns side by side, stacked
+        // top to bottom, vertical scrolling; the calculator large tile fills a whole
+        // row (spans both columns), other tiles pair up two per row
         let y0 = self.top_h() + self.fs(150.0);
         let pad = self.fs(40.0);
         let gap = self.fs(6.0);
         let content_w = (lw - pad * 2.0).max(self.fs(200.0));
-        let uw = (content_w - gap) / 2.0; // 单列磁贴宽
-        let uh = uw.clamp(self.fs(70.0), self.fs(150.0)); // 磁贴高
+        let uw = (content_w - gap) / 2.0; // single-column tile width
+        let uh = uw.clamp(self.fs(70.0), self.fs(150.0)); // tile height
 
         enum Row {
             Header(&'static str),
@@ -1115,8 +1118,8 @@ impl MetroCalcApp {
             Row::Tile(StartTileDef { span: 1, glyph: Glyph::Power, label: s.t_exit, color: Color32::from_rgb(0x4A, 0x4A, 0x4A), act: HitAct::Exit }),
         ];
 
-        let mut cy = y0; // 未滚动内容游标
-        let mut col = 0usize; // 0 = 左列，1 = 右列
+        let mut cy = y0; // unscrolled content cursor
+        let mut col = 0usize; // 0 = left column, 1 = right column
         let mut idx = 0usize;
         let mut group_i = 0usize;
         for row in rows.iter() {
@@ -1126,7 +1129,7 @@ impl MetroCalcApp {
                         (elapsed - (0.65 + group_i as f32 * 0.12)) / 0.30,
                     );
                     group_i += 1;
-                    // 组标题前留出呼吸空隙，避免与上一行磁贴贴边/重叠
+                    // Breathing room before group headers, avoiding flush/overlap with the tile row above
                     cy += self.fs(16.0);
                     let draw_y = cy - self.start_scroll_y;
                     if draw_y > -self.fs(30.0) && draw_y < lh && ghp > 0.01 {
@@ -1149,8 +1152,8 @@ impl MetroCalcApp {
                         cy += uh + gap;
                         col = 0;
                     }
-                    // draw_y 必须在 cy 推进之后重新计算（组标题会推进 cy），
-                    // 否则磁贴会拿上一轮的旧 y 值，压住组标题
+                    // draw_y must be recomputed after advancing cy (group headers
+                    // advance cy), otherwise tiles use a stale y value and cover the header
                     let draw_y = cy - self.start_scroll_y;
                     let tw = if span == 2 { content_w } else { uw };
                     let x = pad + col as f32 * (uw + gap);
@@ -1168,7 +1171,7 @@ impl MetroCalcApp {
             }
         }
         self.start_content_h = cy - y0 + self.fs(20.0);
-        // 纵向平移通过滚轮与空白处拖拽手势完成（Metro 惯例）
+        // Vertical panning via wheel and blank-area drag gesture (Metro convention)
     }
 
     fn start_tile(
@@ -1186,7 +1189,7 @@ impl MetroCalcApp {
         let delay = 0.75 + idx as f32 * 0.07;
         let pin = theme::ease_out((elapsed - delay) / 0.32);
         if pin <= 0.01 {
-            return; // 分批渐进：还没轮到这块磁贴
+            return; // staggered entrance: this tile's turn hasn't come yet
         }
         let rect = Rect::from_xywh(
             rect.left,
@@ -1224,8 +1227,9 @@ impl MetroCalcApp {
         let label_size = self.fs(if big { 26.0 } else { 19.0 });
         let label_y = rect.bottom - if big { 16.0 } else { 11.0 };
 
-        // 计算器磁贴：动态磁贴翻转（每 5 秒，翻 0.6 秒）
-        // 基于 Skia 变换矩阵的 2D 平面轻量翻转：围绕磁贴中心做 X 轴缩放
+        // Calculator tile: live flip (every 5s, flip lasts 0.6s)
+        // Lightweight 2D plane flip via Skia transform matrix: X-axis scaling
+        // around the tile center
         if idx == 0 {
             let phase = now.duration_since(self.t0).as_secs_f32() % 5.0;
             let (sx, front) = if phase < 0.6 {
@@ -1257,7 +1261,7 @@ impl MetroCalcApp {
                     skc(Color32::WHITE, pin),
                 );
             }
-            // 标签也在变换矩阵内（局部坐标 = 绝对坐标 - 磁贴中心）
+            // Label is also inside the transform (local coords = absolute coords - tile center)
             self.push_text(
                 fr,
                 def.label,
@@ -1448,15 +1452,17 @@ impl MetroCalcApp {
 
     fn build_calc(&mut self, fr: &mut Frame, pal: &Palette, lw: f32, lh: f32, now: Instant) {
         let s = self.ui_scale;
-        // 历史面板打开时内容实时回流（而不是被面板覆盖）：
-        // 可用宽度 = 窗口宽 - 面板宽（面板宽度本身带动画，回流平滑）
+        // Content reflows live while the history panel is open (not just covered):
+        // available width = window width - panel width (panel width itself is
+        // animated, so reflow is smooth)
         let content_w = (lw - self.hist_w.value).max(200.0);
         let disp_h = (((lh - self.top_h()) * 0.28).clamp(120.0, 200.0 * s)).max(100.0);
         let disp = Rect::from_xywh(16.0, self.top_h() + 8.0, content_w - 32.0, disp_h);
         self.build_display(fr, pal, disp, now);
 
-        // 键盘固定上下两列（2 列 × 12 行），间距 4px；
-        // 行数超出可视高度时通过真实滚轮/拖拽平移查看，磁贴永不切断/重叠
+        // Keypad fixed at two columns (2 cols × 12 rows), 4px gap;
+        // when rows exceed the visible height, pan with real wheel/drag —
+        // tiles are never clipped or overlapped
         let gap = 4.0f32;
         let n = 24.0f32;
         let cols = 2.0f32;
@@ -1507,7 +1513,7 @@ impl MetroCalcApp {
         let off_y = (1.0 - pin) * 16.0;
         let rect = Rect::from_xywh(rect.left, rect.top + off_y, rect.width(), rect.height());
 
-        // Win8 风格磁贴“下沉倾斜”：缩小 + 向按压点倾斜
+        // Win8-style tile "sink tilt": shrink + tilt toward the press point
         let scale = 1.0 - 0.06 * press;
         let (mut tx, mut ty) = (0.0f32, 0.0f32);
         if press > 0.01 {
@@ -1568,7 +1574,7 @@ impl MetroCalcApp {
             }
         }
 
-        // 键盘焦点环（可访问性）：白色描边始终清晰可见
+        // Keyboard focus ring (accessibility): white outline always clearly visible
         if self.focus == Some(idx) {
             fr.cmds.push(Cmd::StrokeRect(
                 Rect::from_xywh(
@@ -1681,7 +1687,7 @@ impl MetroCalcApp {
             skc(if is_err { pal.error } else { pal.text }, 1.0),
         );
 
-        // 结果出现时的强调色下划线扫光
+        // Accent underline sweep when a result appears
         if let Some(t) = pop_t {
             let w = rect.width() * theme::ease_out((t / 1.4).min(1.0));
             if t < 1.4 && w > 1.0 {
@@ -1728,7 +1734,7 @@ impl MetroCalcApp {
 
     // ---------- top bar ----------
 
-    /// 顶栏按钮公共部分：悬停时的浅色高亮底（Win8 Metro 惯例）。
+    /// Shared top-bar button part: light hover highlight (Win8 Metro convention).
     fn bar_hover(&self, fr: &mut Frame, key: HitKey, rect: Rect, bgc: Color32, tc: Color32) {
         let (hov, _) = self.anim_get(key);
         if hov > 0.01 {
@@ -1748,7 +1754,7 @@ impl MetroCalcApp {
             skc(pal.bg, 1.0),
         ));
 
-        // 返回按钮（动画进出），始终回开始屏幕
+        // Back button (animates in/out), always returns to the start screen
         let ap = self.back_vis.value;
         if ap > 0.02 {
             let (hov, press) = self.anim_get(HitKey::Bar(BarBtn::Back));
@@ -1792,7 +1798,7 @@ impl MetroCalcApp {
             skc(pal.weak, 1.0),
         );
 
-        // 右侧按钮（左→右：home, history, help, settings, theme, lang）
+        // Right-side buttons (left→right: home, history, help, settings, theme, lang)
         let (tc, bgc) = (pal.text, pal.bg);
         let bar_y = k * 10.0;
         let icon = k * 38.0;
@@ -1805,7 +1811,7 @@ impl MetroCalcApp {
         let lang_x = lw - k * 66.0;
         let _ = now;
 
-        // home（四色小方块，Win8 徽标式）
+        // home (four-color squares, Win8-logo style)
         {
             let rect = Rect::from_xywh(home_x, bar_y, icon, icon);
             self.bar_hover(fr, HitKey::Bar(BarBtn::Home), rect, bgc, tc);
@@ -1827,7 +1833,7 @@ impl MetroCalcApp {
                 act: HitAct::GoTo(Page::Start),
             });
         }
-        // history 时钟
+        // history clock
         {
             let rect = Rect::from_xywh(history_x, bar_y, icon, icon);
             self.bar_hover(fr, HitKey::Bar(BarBtn::History), rect, bgc, tc);
@@ -1853,7 +1859,7 @@ impl MetroCalcApp {
                 act: HitAct::GoTo(Page::Help),
             });
         }
-        // settings 齿轮
+        // settings gear
         {
             let rect = Rect::from_xywh(settings_x, bar_y, icon, icon);
             self.bar_hover(fr, HitKey::Bar(BarBtn::Settings), rect, bgc, tc);
@@ -1876,7 +1882,7 @@ impl MetroCalcApp {
                 act: HitAct::GoTo(Page::Settings),
             });
         }
-        // theme 半月
+        // theme half-moon
         {
             let rect = Rect::from_xywh(theme_x, bar_y, icon, icon);
             self.bar_hover(fr, HitKey::Bar(BarBtn::Theme), rect, bgc, tc);
@@ -1917,7 +1923,7 @@ impl MetroCalcApp {
         }
         let panel = Rect::from_xywh(lw - w, self.top_h(), w, (lh - self.top_h()).max(0.0));
         fr.push_clip(panel);
-        // 不透明底色 + Metro 强调色边条：与主内容彻底隔离
+        // Opaque background + Metro accent edge strip: fully separated from main content
         fr.cmds.push(Cmd::FillRect(panel, skc(pal.panel, 1.0)));
         fr.cmds.push(Cmd::FillRect(
             Rect::from_xywh(panel.left, panel.top, 3.0, panel.height()),
@@ -1984,7 +1990,7 @@ impl MetroCalcApp {
             for (i, (id, expr, raw, at)) in items.into_iter().enumerate() {
                 let y = self.top_h() + 44.0 + i as f32 * 56.0 - self.hist_scroll;
                 if y > lh + 56.0 || y + 56.0 < self.top_h() {
-                    continue; // 面板可视范围外按需跳过
+                    continue; // skip items outside the panel's visible range
                 }
                 let rect = Rect::from_xywh(base_x - 12.0, y, HIST_W - 24.0, 54.0);
                 let key = HitKey::HistItem(id);
@@ -2063,7 +2069,7 @@ impl MetroCalcApp {
         self.help_content_h = y + self.fs(24.0) - top;
         fr.pop();
         fr.pop();
-        // 纵向平移通过滚轮与空白处拖拽手势完成
+        // Vertical panning via wheel and blank-area drag gesture
     }
 
     fn build_settings(&mut self, fr: &mut Frame, pal: &Palette, lw: f32, lh: f32) {
@@ -2181,7 +2187,7 @@ impl MetroCalcApp {
         self.set_content_h = y + self.fs(24.0) - top;
         fr.pop();
         fr.pop();
-        // 纵向平移通过滚轮与空白处拖拽手势完成
+        // Vertical panning via wheel and blank-area drag gesture
     }
 
     fn heading(&self, fr: &mut Frame, pal: &Palette, title: &str, y: &mut f32) {
@@ -2288,7 +2294,7 @@ impl MetroCalcApp {
         self.scale = scale;
         self.lw = pw as f32 / scale;
         self.lh = ph as f32 / scale;
-        // 响应式：以 720×560 为基准（字号更大），全屏时按比例继续撑开
+        // Responsive: 720×560 baseline (larger fonts), keeps expanding proportionally fullscreen
         self.ui_scale = ((self.lw / 720.0).max(self.lh / 560.0)).clamp(1.0, 2.4);
         if self.surface_size != (pw, ph) {
             match self.backend.as_mut() {
@@ -2355,7 +2361,7 @@ impl MetroCalcApp {
         self.sync_size();
         let now = Instant::now();
         let fr = self.build_frame(now);
-        // 动画状态表裁剪：只保留本帧可见区域 + 顶栏常驻项（防止长期累积）
+        // Trim the animation state table: keep only regions visible this frame + persistent top-bar items (prevents unbounded growth)
         {
             let live: std::collections::HashSet<HitKey> =
                 fr.regions.iter().map(|r| r.key).collect();
@@ -2368,7 +2374,7 @@ impl MetroCalcApp {
         self.regions = fr.regions.clone();
         self.cursor_pointer = fr.cursor_pointer;
 
-        // 每帧必须先清屏：上一帧内容不允许残留（否则出现残影/条形码污染）
+        // Must clear the canvas every frame: no leftover content from the previous frame (otherwise ghosting / barcode artifacts)
         let bg = skc(self.pal().bg, 1.0);
 
         match self.backend.as_mut() {
@@ -2561,7 +2567,7 @@ fn surfaces_raster(w: u32, h: u32) -> SkSurface {
 
 fn window_attrs() -> winit::window::WindowAttributes {
     let mut attrs = Window::default_attributes()
-        .with_title("Metro 计算器 · Metro Calculator")
+        .with_title("Metro Calculator")
         .with_inner_size(LogicalSize::new(880.0f64, 680.0f64))
         .with_min_inner_size(LogicalSize::new(480.0f64, 360.0f64));
     if let Some(icon) = crate::icon::window_icon() {
@@ -2601,7 +2607,7 @@ impl ApplicationHandler for MetroCalcApp {
                 self.init_cpu(el);
             }
         }
-        // 时序基准从窗口就绪算起：splash → 标题框架 → 磁贴分批浮现
+        // Timing baseline starts when the window is ready: splash → title frame → staggered tiles
         self.t0 = Instant::now();
         self.entrance_start = self.t0;
         self.dirty = true;
@@ -2631,7 +2637,7 @@ impl ApplicationHandler for MetroCalcApp {
             WindowEvent::CursorMoved { position, .. } => {
                 let s = self.scale.max(1.0);
                 self.pointer = ((position.x as f32) / s, (position.y as f32) / s);
-                // 拖拽平移（Metro 式滑动手势）：空白处按住即可滚动
+                // Drag panning (Metro-style swipe gesture): press on blank space to scroll
                 if let Some((horizontal, p0, s0)) = self.drag {
                     let cur = if horizontal { self.pointer.0 } else { self.pointer.1 };
                     let d = p0 - cur;
@@ -2655,8 +2661,8 @@ impl ApplicationHandler for MetroCalcApp {
             }
             WindowEvent::MouseInput { state, button: MouseButton::Left, .. } => match state {
                 ElementState::Pressed => {
-                    // 按下只记录热区 + 涟漪反馈；鼠标接管焦点；
-                    // 空白处按下进入拖拽平移；动作统一在 Released 触发一次
+                    // Press only records the hit region + ripple feedback; mouse takes focus;
+                    // blank-area press starts drag panning; actions fire once on Released
                     self.focus = None;
                     match self.hit_test(self.pointer.0, self.pointer.1).cloned() {
                         Some(r) => {
@@ -2672,7 +2678,7 @@ impl ApplicationHandler for MetroCalcApp {
                             }
                         }
                         None => {
-                            // 所有页面均为纵向平移（开始屏幕两列磁贴纵向滚动）
+                            // All pages pan vertically (start-screen two-column tiles scroll vertically)
                             let sc = match self.page {
                                 Page::Start => self.start_scroll_y,
                                 Page::Help => self.help_scroll,
@@ -2709,10 +2715,10 @@ impl ApplicationHandler for MetroCalcApp {
                     self.hist_scroll -= dy;
                 } else {
                     match self.page {
-                        Page::Start => self.start_scroll_y -= dy, // 两列磁贴纵向滚动
+                        Page::Start => self.start_scroll_y -= dy, // two-column tiles scroll vertically
                         Page::Help => self.help_scroll -= dy,
                         Page::Settings => self.set_scroll -= dy,
-                        Page::Calc => self.calc_scroll -= dy, // 窗口过矮时的纵向滚动
+                        Page::Calc => self.calc_scroll -= dy, // vertical scroll when the window is too short
                     }
                 }
                 self.dirty = true;
@@ -2754,9 +2760,10 @@ fn is_font_file(b: &[u8]) -> bool {
             || b.starts_with(b"true"))
 }
 
-/// 通过系统字体管理器（Windows: DirectWrite / macOS: CoreText / Linux: FreeType）
-/// 从字体文件字节创建字模。注意必须用 `FontMgr::new()`——
-/// `empty()` 是空对象管理器，`make_from_data` 永远返回 None。
+/// Create a typeface from font-file bytes via the system font manager
+/// (Windows: DirectWrite / macOS: CoreText / Linux: FreeType). Note that
+/// `FontMgr::new()` must be used —
+/// `empty()` is the null-object manager and `make_from_data` always returns None.
 fn load_typeface(paths: &[&str]) -> Option<Typeface> {
     let mgr = FontMgr::new();
     for p in paths {
@@ -2771,7 +2778,7 @@ fn load_typeface(paths: &[&str]) -> Option<Typeface> {
     None
 }
 
-/// 兜底：直接按字体族名向系统字体管理器请求。
+/// Fallback: request a family by name directly from the system font manager.
 fn load_family(families: &[&str]) -> Option<Typeface> {
     let mgr = FontMgr::new();
     for name in families {
@@ -2876,8 +2883,9 @@ pub mod selftest {
         Ok(())
     }
 
-    /// 字体烟雾测试：离屏渲染一行文字并统计非背景像素，
-    /// 确保 Skia 字体加载与光栅化真实可用（回归防护）。
+    /// Font smoke test: render a line of text offscreen and count non-background
+    /// pixels, ensuring Skia font loading and rasterization really work
+    /// (regression guard).
     fn font_smoke() -> Result<(), String> {
         let (display, body) = super::load_typefaces();
         let Some(tf) = body.as_ref().or(display.as_ref()) else {

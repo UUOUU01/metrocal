@@ -1,5 +1,3 @@
-//! 计算器状态机 —— 纯逻辑，无 UI、无 unsafe，附带完整单元测试。
-//!
 //! Calculator state machine — pure logic, no UI, no unsafe, fully unit-tested.
 
 use serde::{Deserialize, Serialize};
@@ -258,8 +256,9 @@ impl Engine {
         if self.error.is_some() {
             return;
         }
-        // 仅当存在未完成的运算时才计算；重复按 = 是无操作（幂等）。
-        // 不做“重复上一次运算”，严格区分当前输入与运算缓存。
+        // Only evaluate when there is a pending operation; repeating = is a
+        // no-op (idempotent). No "repeat last operation": current input and
+        // the operation cache are kept strictly apart.
         if let (Some(po), Some(a)) = (self.op, self.acc) {
             let b = self.current().unwrap_or(a);
             match po.apply(a, b) {
@@ -272,8 +271,9 @@ impl Engine {
         }
     }
 
-    /// 百分号 = 正常数学运算：当前数字除以 100（200 % → 2，5 % → 0.05）。
-    /// 幂等安全：连按只会持续 ÷100，结果始终是合法纯数字，无字符串拼接。
+    /// Percent = ordinary math: divide the current number by 100 (200 % → 2, 5 % → 0.05).
+    /// Idempotent-safe: repeated presses keep dividing by 100; the result stays a
+    /// valid plain number, never malformed text.
     pub fn percent(&mut self) {
         if self.error.is_some() {
             return;
@@ -451,9 +451,10 @@ impl Engine {
     }
 }
 
-/// 鲁棒性模糊测试：确定性伪随机（xorshift）狂轰滥炸 20 万次随机输入，
-/// 断言状态机永远不产生非法字符串、非法数值或不可恢复状态。
-/// 任何一次失败都会带步骤号与现场返回 Err。
+/// Robustness fuzz test: deterministic PRNG (xorshift) hammering the engine
+/// with 200k random inputs, asserting the state machine never produces an
+/// invalid string, a non-finite value without an error state, or an
+/// unrecoverable state. Any failure returns Err with the step number.
 pub fn fuzz_check() -> Result<(), String> {
     let mut st: u64 = 0x9E37_79B9_7F4A_7C15;
     let mut rnd = move || {
@@ -508,23 +509,23 @@ pub fn fuzz_check() -> Result<(), String> {
             }
         }
 
-        // 不变式 1：输入串永远是合法的规范数字
+        // Invariant 1: the entry string is always a valid canonical number
         if !valid_entry(c.entry_str()) {
             return Err(format!("fuzz step {step}: invalid entry {:?}", c.entry_str()));
         }
-        // 不变式 2：数值要么有限，要么处于显式错误态
+        // Invariant 2: the value is either finite or in an explicit error state
         if let Some(v) = c.raw_value() {
             if !v.is_finite() {
                 return Err(format!("fuzz step {step}: non-finite value without error"));
             }
         }
-        // 不变式 3：历史记录硬上限
+        // Invariant 3: hard cap on history length
         if c.history.len() > 50 {
             return Err(format!("fuzz step {step}: history exceeded cap"));
         }
     }
 
-    // 不变式 4：模糊轰炸后 C 必须完全恢复；等号保持幂等
+    // Invariant 4: after hammering, C must fully reset; equals stays idempotent
     c.c();
     c.digit(2);
     c.set_op(Op::Add);
@@ -544,8 +545,9 @@ pub fn fuzz_check() -> Result<(), String> {
 
 /// Canonical ASCII number → plain (never scientific) string.
 ///
-/// entry / 历史记录一律使用纯数字格式（保证 entry 状态机永远合法）；
-/// 科学计数法只存在于显示层（i18n::fmt_value）。
+/// entry / history always use plain number format (guarantees the entry state
+/// machine stays valid); scientific notation exists only in the display layer
+/// (i18n::fmt_value).
 pub fn num_to_string(v: f64) -> String {
     if v == 0.0 {
         return "0".to_owned(); // also normalises -0.0
@@ -606,7 +608,7 @@ pub fn self_check() -> Result<(), String> {
     eq(c.error, None, "digit clears error")?;
     eq(c.raw_value(), Some(7.0), "fresh after error")?;
 
-    // percent = ÷100（纯数学语义）
+    // percent = ÷100 (pure math semantics)
     c.c();
     for d in [2u8, 0, 0] {
         c.digit(d);

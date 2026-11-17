@@ -1,11 +1,11 @@
-//! 应用图标：蓝色方底 + 白色计算器字形（Metro 扁平），透明背景。
-//! 运行时窗口图标（标题栏/任务栏）+ 多尺寸规范 .ico 生成器（32bpp BMP 条目）。
+//! App icon: blue square background + white calculator glyph (Metro flat), transparent background.
+//! Runtime window icon (title bar / taskbar) + spec-compliant multi-size .ico generator (32bpp BMP entries).
 
 use skia_safe::{surfaces, Color, ColorType, AlphaType, ImageInfo, Paint, PaintStyle, Rect};
 
-const BG: (u8, u8, u8) = (0x00, 0x78, 0xD4); // Metro 蓝
+const BG: (u8, u8, u8) = (0x00, 0x78, 0xD4); // Metro blue
 
-/// 渲染 size×size 的 RGBA（自上而下、逐像素 4 字节）图标位图。
+/// Render a size×size RGBA (top-down, 4 bytes per pixel) icon bitmap.
 pub fn render_rgba(size: u32) -> Vec<u8> {
     let mut surface =
         surfaces::raster_n32_premul((size as i32, size as i32)).expect("icon surface");
@@ -13,15 +13,15 @@ pub fn render_rgba(size: u32) -> Vec<u8> {
         let canvas = surface.canvas();
         canvas.clear(Color::TRANSPARENT);
         let s = size as f32;
-        let m = s * 0.04; // 透明外边
+        let m = s * 0.04; // transparent margin
         let side = s - 2.0 * m;
-        // 蓝色方底（Metro 直角）
+        // Blue square background (Metro square corners)
         let mut p = Paint::default();
         p.set_color(Color::from_rgb(BG.0, BG.1, BG.2));
         canvas.draw_rect(Rect::from_xywh(m, m, side, side), &p);
-        // 白色计算器字形（居中）
-        let gw = side * 0.50; // 字形宽
-        let gh = side * 0.64; // 字形高
+        // White calculator glyph (centered)
+        let gw = side * 0.50; // glyph width
+        let gh = side * 0.64; // glyph height
         let gx = m + (side - gw) / 2.0;
         let gy = m + (side - gh) / 2.0;
         let mut w = Paint::default();
@@ -30,7 +30,7 @@ pub fn render_rgba(size: u32) -> Vec<u8> {
         w.set_style(PaintStyle::Stroke);
         w.set_stroke_width(s * 0.035);
         canvas.draw_rect(Rect::from_xywh(gx, gy, gw, gh), &w);
-        // 显示条
+        // Display bar
         let mut f = Paint::default();
         f.set_anti_alias(true);
         f.set_color(Color::WHITE);
@@ -38,7 +38,7 @@ pub fn render_rgba(size: u32) -> Vec<u8> {
             Rect::from_xywh(gx + gw * 0.16, gy + gh * 0.12, gw * 0.68, gh * 0.16),
             &f,
         );
-        // 2×3 按键点
+        // 2×3 keypad dots
         for r in 0..2 {
             for c in 0..3 {
                 canvas.draw_circle(
@@ -63,25 +63,25 @@ pub fn render_rgba(size: u32) -> Vec<u8> {
     buf
 }
 
-/// 运行时窗口图标（标题栏 + 任务栏）。
+/// Runtime window icon (title bar + taskbar).
 pub fn window_icon() -> Option<winit::window::Icon> {
     let rgba = render_rgba(64);
     winit::window::Icon::from_rgba(rgba, 64, 64).ok()
 }
 
-/// 生成规范 .ico（16/24/32/48/64/128/256，全部 32bpp 带透明通道）。
+/// Generate a spec-compliant .ico (16/24/32/48/64/128/256, all 32bpp with alpha).
 pub fn write_ico(path: &std::path::Path) -> std::io::Result<()> {
     let sizes = [16u32, 24, 32, 48, 64, 128, 256];
     let mut images: Vec<(u32, Vec<u8>)> = Vec::new();
     for &s in &sizes {
         let rgba = render_rgba(s);
-        // 32bpp BMP：BITMAPINFOHEADER(40) + 自下而上 BGRA 像素 + AND 掩码（全 0）
+        // 32bpp BMP: BITMAPINFOHEADER(40) + bottom-up BGRA pixels + AND mask (all zeros)
         let mask_row = ((s + 31) / 32) * 4;
         let mut bmp: Vec<u8> = Vec::with_capacity(40 + (s * 4 + mask_row * s) as usize);
         let mut push32 = |v: i32, out: &mut Vec<u8>| out.extend((v as u32).to_le_bytes());
         push32(40, &mut bmp); // biSize
         push32(s as i32, &mut bmp); // biWidth
-        push32((s * 2) as i32, &mut bmp); // biHeight = 图像高度 ×2（含掩码）
+        push32((s * 2) as i32, &mut bmp); // biHeight = image height ×2 (includes mask)
         bmp.extend(1u16.to_le_bytes()); // biPlanes
         bmp.extend(32u16.to_le_bytes()); // biBitCount
         push32(0, &mut bmp); // biCompression = BI_RGB

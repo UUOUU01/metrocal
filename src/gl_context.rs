@@ -1,5 +1,3 @@
-//! OpenGL 上下文创建 —— 本 crate 中唯一包含 unsafe 代码的模块。
-//!
 //! OpenGL context creation — the ONLY module in this crate that contains
 //! unsafe code. The crate is compiled with `#![deny(unsafe_code)]`; this
 //! module deliberately opts in (`#![allow(unsafe_code)]`) for exactly two
@@ -19,7 +17,7 @@ use glutin::error::Error as GlError;
 use glutin::surface::{Surface as GlutinSurface, SurfaceAttributes, WindowSurface};
 use glutin::context::{ContextAttributes, NotCurrentContext};
 
-/// 创建未激活的 GL 上下文。
+/// Create a not-yet-current GL context.
 ///
 /// SAFETY: `display.create_context` is an FFI call into the platform GL/EGL/WGL
 /// loader. It is sound here because `config` was enumerated by this `display`
@@ -33,7 +31,7 @@ pub fn create_context(
     unsafe { display.create_context(config, attrs) }.map_err(|e: GlError| e.to_string())
 }
 
-/// 创建窗口表面（交换缓冲目标）。
+/// Create the window surface (the swap-buffer target).
 ///
 /// SAFETY: `display.create_window_surface` is an FFI call; sound because the
 /// raw window handle inside `attrs` belongs to a live window whose `Arc` we

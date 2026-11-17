@@ -6,15 +6,15 @@ description = "Metro-style calculator rendered with Skia, written in 100% safe R
 license = "MIT"
 
 [dependencies]
-# Skia (Google) 渲染 —— GPU 加速（OpenGL 后端）为主，CPU 光栅仅作兜底
+# Skia (Google) rendering — GPU-accelerated (OpenGL backend) first, CPU raster as fallback
 skia-safe = { version = "0.157.0", features = ["gl"] }
-# 窗口与事件（跨平台）
+# Windowing & events (cross-platform)
 winit = "0.30.13"
-# OpenGL 上下文创建（Skia GPU 后端）
+# OpenGL context creation (Skia GPU backend)
 glutin = "0.32"
 glutin-winit = "0.5"
 raw-window-handle = "0.6"
-# 把 Skia 位图呈现到窗口（Windows GDI / X11 / Wayland / macOS）
+# Present Skia bitmaps to the window (Windows GDI / X11 / Wayland / macOS)
 softbuffer = "0.4.8"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
