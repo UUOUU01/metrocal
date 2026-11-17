@@ -427,7 +427,7 @@ impl MetroCalcApp {
         );
         let mut app = Self {
             engine: Engine::new(),
-            lang: Lang::ZhCn,
+            lang: Lang::En,
             theme: Theme::Dark,
             accent_idx: 0,
             page: Page::Start,
@@ -1456,14 +1456,14 @@ impl MetroCalcApp {
         let disp = Rect::from_xywh(16.0, self.top_h() + 8.0, content_w - 32.0, disp_h);
         self.build_display(fr, pal, disp, now);
 
-        // 键盘固定上下两列（2 列 × 12 行），间距 3px；
+        // 键盘固定上下两列（2 列 × 12 行），间距 4px；
         // 行数超出可视高度时通过真实滚轮/拖拽平移查看，磁贴永不切断/重叠
-        let gap = 3.0f32;
+        let gap = 4.0f32;
         let n = 24.0f32;
         let cols = 2.0f32;
         let rows_n = (n / cols).ceil();
-        let min_th = 40.0;
-        let grid_top = disp.bottom + 12.0;
+        let min_th = 44.0;
+        let grid_top = disp.bottom + 16.0;
         let avail = (lh - grid_top).max(0.0);
         let needed = rows_n * min_th + (rows_n - 1.0) * gap;
         let th = if avail >= needed {
@@ -1538,7 +1538,7 @@ impl MetroCalcApp {
         fr.cmds.push(Cmd::FillRect(draw_rect, skc(col, 1.0)));
 
         let tcol = kind.text(pal);
-        let tsize = (rect.height() * 0.44).clamp(20.0, 42.0);
+        let tsize = (rect.height() * 0.52).clamp(22.0, 46.0);
         let px = dcx + tx * 0.5;
         let py = dcy + ty * 0.5;
         match label {
@@ -1656,15 +1656,15 @@ impl MetroCalcApp {
         let n = text.chars().count();
         let mut size = self.ui_scale
             * if is_err {
-                36.0
-            } else if n <= 9 {
-                72.0
-            } else if n <= 13 {
-                54.0
-            } else if n <= 18 {
                 42.0
+            } else if n <= 9 {
+                78.0
+            } else if n <= 13 {
+                58.0
+            } else if n <= 18 {
+                46.0
             } else {
-                34.0
+                38.0
             };
         if let Some(t) = pop_t {
             if t < 1.0 {
