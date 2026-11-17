@@ -1095,7 +1095,6 @@ impl MetroCalcApp {
         let content_w = (lw - pad * 2.0).max(self.fs(200.0));
         let uw = (content_w - gap) / 2.0; // 单列磁贴宽
         let uh = uw.clamp(self.fs(70.0), self.fs(150.0)); // 磁贴高
-        let view_h = (lh - y0).max(0.0);
 
         enum Row {
             Header(&'static str),
@@ -1729,6 +1728,17 @@ impl MetroCalcApp {
 
     // ---------- top bar ----------
 
+    /// 顶栏按钮公共部分：悬停时的浅色高亮底（Win8 Metro 惯例）。
+    fn bar_hover(&self, fr: &mut Frame, key: HitKey, rect: Rect, bgc: Color32, tc: Color32) {
+        let (hov, _) = self.anim_get(key);
+        if hov > 0.01 {
+            fr.cmds.push(Cmd::FillRect(
+                rect,
+                skc(theme::mix(bgc, tc, 0.10 * hov), 1.0),
+            ));
+        }
+    }
+
     fn build_top_bar(&mut self, fr: &mut Frame, pal: &Palette, lw: f32, now: Instant) {
         let s = i18n::strings(self.lang);
         let k = self.ui_scale;
@@ -1798,10 +1808,7 @@ impl MetroCalcApp {
         // home（四色小方块，Win8 徽标式）
         {
             let rect = Rect::from_xywh(home_x, bar_y, icon, icon);
-            let (hov, _) = self.anim_get(HitKey::Bar(BarBtn::Home));
-            if hov > 0.01 {
-                fr.cmds.push(Cmd::FillRect(rect, skc(theme::mix(bgc, tc, 0.10 * hov), 1.0)));
-            }
+            self.bar_hover(fr, HitKey::Bar(BarBtn::Home), rect, bgc, tc);
             let c = rect_center(rect);
             let q = k * 5.5;
             let g = k * 2.5;
@@ -1823,10 +1830,7 @@ impl MetroCalcApp {
         // history 时钟
         {
             let rect = Rect::from_xywh(history_x, bar_y, icon, icon);
-            let (hov, _) = self.anim_get(HitKey::Bar(BarBtn::History));
-            if hov > 0.01 {
-                fr.cmds.push(Cmd::FillRect(rect, skc(theme::mix(bgc, tc, 0.10 * hov), 1.0)));
-            }
+            self.bar_hover(fr, HitKey::Bar(BarBtn::History), rect, bgc, tc);
             let c: Point = rect_center(rect).into();
             fr.cmds.push(Cmd::StrokeCircle(c, k * 8.5, skc(tc, 1.0), k * 2.0));
             fr.cmds.push(Cmd::Line(c, (c.x, c.y - k * 5.0).into(), skc(tc, 1.0), k * 2.0));
@@ -1840,10 +1844,7 @@ impl MetroCalcApp {
         // help "?"
         {
             let rect = Rect::from_xywh(help_x, bar_y, icon, icon);
-            let (hov, _) = self.anim_get(HitKey::Bar(BarBtn::Help));
-            if hov > 0.01 {
-                fr.cmds.push(Cmd::FillRect(rect, skc(theme::mix(bgc, tc, 0.10 * hov), 1.0)));
-            }
+            self.bar_hover(fr, HitKey::Bar(BarBtn::Help), rect, bgc, tc);
             let c = rect_center(rect);
             self.push_text(fr, "?", c.0, c.1, TextAlign::Center, k * 20.0, skc(tc, 1.0));
             fr.regions.push(HitRegion {
@@ -1855,10 +1856,7 @@ impl MetroCalcApp {
         // settings 齿轮
         {
             let rect = Rect::from_xywh(settings_x, bar_y, icon, icon);
-            let (hov, _) = self.anim_get(HitKey::Bar(BarBtn::Settings));
-            if hov > 0.01 {
-                fr.cmds.push(Cmd::FillRect(rect, skc(theme::mix(bgc, tc, 0.10 * hov), 1.0)));
-            }
+            self.bar_hover(fr, HitKey::Bar(BarBtn::Settings), rect, bgc, tc);
             let c: Point = rect_center(rect).into();
             fr.cmds.push(Cmd::StrokeCircle(c, k * 6.5, skc(tc, 1.0), k * 2.0));
             for i in 0..8 {
@@ -1881,10 +1879,7 @@ impl MetroCalcApp {
         // theme 半月
         {
             let rect = Rect::from_xywh(theme_x, bar_y, icon, icon);
-            let (hov, _) = self.anim_get(HitKey::Bar(BarBtn::Theme));
-            if hov > 0.01 {
-                fr.cmds.push(Cmd::FillRect(rect, skc(theme::mix(bgc, tc, 0.10 * hov), 1.0)));
-            }
+            self.bar_hover(fr, HitKey::Bar(BarBtn::Theme), rect, bgc, tc);
             let c: Point = rect_center(rect).into();
             fr.cmds.push(Cmd::FillCircle(c, k * 9.0, skc(tc, 1.0)));
             fr.push_clip(Rect::from_xywh(c.x, c.y - k * 10.0, k * 11.0, k * 20.0));
@@ -1902,10 +1897,7 @@ impl MetroCalcApp {
         // language
         {
             let rect = Rect::from_xywh(lang_x, bar_y, icon, icon);
-            let (hov, _) = self.anim_get(HitKey::Bar(BarBtn::Lang));
-            if hov > 0.01 {
-                fr.cmds.push(Cmd::FillRect(rect, skc(theme::mix(bgc, tc, 0.10 * hov), 1.0)));
-            }
+            self.bar_hover(fr, HitKey::Bar(BarBtn::Lang), rect, bgc, tc);
             let c = rect_center(rect);
             self.push_text(fr, self.lang.short(), c.0, c.1, TextAlign::Center, k * 15.0, skc(tc, 1.0));
             fr.regions.push(HitRegion {
