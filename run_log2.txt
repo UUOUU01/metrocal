@@ -1,1 +1,0 @@
-renderer: Skia GPU (OpenGL) unavailable (create_context: extension to create ES context with wgl is not present) — falling back to CPU raster
