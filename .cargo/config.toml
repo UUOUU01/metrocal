@@ -1,0 +1,5 @@
+# 本地构建辅助：skia-bindings 预编译二进制包的本地缓存。
+# GitHub 直连不稳定时，用它离线安装 Skia 预编译库（与 registry 中的包配对）。
+# 首次构建前请先执行一次 `cargo build`（或保留 skia-bin/ 目录）。
+[env]
+SKIA_BINARIES_URL = "file://D:/Rust/MetroCenter/skia-bin/skia-binaries.tar.gz"
