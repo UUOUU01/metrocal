@@ -51,6 +51,7 @@ const PALETTE_FADE_SECS: f32 = 0.30;
 pub enum Page {
     Start,
     Calc,
+    CalcSci,
     Help,
     Settings,
 }
@@ -60,8 +61,9 @@ impl Page {
         match self {
             Page::Start => 0,
             Page::Calc => 1,
-            Page::Help => 2,
-            Page::Settings => 3,
+            Page::CalcSci => 2,
+            Page::Help => 3,
+            Page::Settings => 4,
         }
     }
 }
@@ -80,6 +82,11 @@ enum Action {
     Recip,
     Sqr,
     Sqrt,
+    Log,
+    Ln,
+    Sin,
+    Cos,
+    Tan,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -91,6 +98,7 @@ enum BarBtn {
     Settings,
     Help,
     History,
+    ToggleSci,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -104,6 +112,7 @@ enum HitKey {
     HistItem(u64),
     HistClear,
     SetClear,
+    ToggleSci,
     SplashSkip,
 }
 
@@ -120,6 +129,7 @@ enum HitAct {
     SetAccent(usize),
     LoadHist(u64),
     ClearHist,
+    ToggleSci,
     SkipSplash,
     Exit,
 }
@@ -624,12 +634,26 @@ impl MetroCalcApp {
             Action::Recip => self.engine.unary(Unary::Recip),
             Action::Sqr => self.engine.unary(Unary::Sqr),
             Action::Sqrt => self.engine.unary(Unary::Sqrt),
+            Action::Log => self.engine.unary(Unary::Log),
+            Action::Ln => self.engine.unary(Unary::Ln),
+            Action::Sin => self.engine.unary(Unary::Sin),
+            Action::Cos => self.engine.unary(Unary::Cos),
+            Action::Tan => self.engine.unary(Unary::Tan),
         }
 
         let newv = self.engine.raw_value();
         if matches!(
             a,
-            Action::Equals | Action::Recip | Action::Sqr | Action::Sqrt | Action::Percent
+            Action::Equals
+                | Action::Recip
+                | Action::Sqr
+                | Action::Sqrt
+                | Action::Log
+                | Action::Ln
+                | Action::Sin
+                | Action::Cos
+                | Action::Tan
+                | Action::Percent
         ) {
             self.result_pop = Some(now);
             if let (Some(pv), Some(nv)) = (self.prev_value, newv) {
@@ -717,6 +741,14 @@ impl MetroCalcApp {
                 self.engine.clear_history();
                 self.save_settings();
                 self.dirty = true;
+            }
+            HitAct::ToggleSci => {
+                let new_page = match self.page_current() {
+                    Page::Calc => Page::CalcSci,
+                    Page::CalcSci => Page::Calc,
+                    _ => return,
+                };
+                self.go_to(now, new_page);
             }
             HitAct::SkipSplash => {
                 self.splash_done = true;
@@ -1193,6 +1225,7 @@ impl MetroCalcApp {
         match page {
             Page::Start => self.build_start(fr, pal, lw, lh, now),
             Page::Calc => self.build_calc(fr, pal, lw, lh, now),
+            Page::CalcSci => self.build_calc(fr, pal, lw, lh, now),
             Page::Help => self.build_help(fr, pal, lw, lh),
             Page::Settings => self.build_settings(fr, pal, lw, lh, now),
         }
@@ -1259,7 +1292,7 @@ impl MetroCalcApp {
 
         // View frustum culling: only render visible tiles
         let view_top = self.top_h();
-        let view_bottom = lh;
+        let _view_bottom = lh;
         let view_margin = self.fs(40.0);
 
         for row in rows.iter() {
@@ -1565,12 +1598,12 @@ impl MetroCalcApp {
     fn tile_specs(&self) -> Vec<(TileLabel, TileKind, Action)> {
         let dec = i18n::dec_sep(self.lang);
         vec![
-            // Row 0: % CE C
+            // Row 0: % CE C ⌫
             (TileLabel::Text("%"), TileKind::Util, Action::Percent),
             (TileLabel::Text("CE"), TileKind::Util, Action::ClearEntry),
             (TileLabel::Text("C"), TileKind::Util, Action::Clear),
             (TileLabel::Text("⌫"), TileKind::Util, Action::Back),
-            // Row 1: 1/x x² √
+            // Row 1: 1/x x² √ ÷
             (TileLabel::Text("1/x"), TileKind::Util, Action::Recip),
             (TileLabel::Text("x²"), TileKind::Util, Action::Sqr),
             (TileLabel::Text("√"), TileKind::Util, Action::Sqrt),
@@ -1585,16 +1618,55 @@ impl MetroCalcApp {
             (TileLabel::Text("5"), TileKind::Digit, Action::Digit(5)),
             (TileLabel::Text("6"), TileKind::Digit, Action::Digit(6)),
             (TileLabel::Text("−"), TileKind::Op, Action::Opset(Op::Sub)),
-            // Row 4: 1 2 3 +
+            // Row 4: 1 2 3 ± =
             (TileLabel::Text("1"), TileKind::Digit, Action::Digit(1)),
             (TileLabel::Text("2"), TileKind::Digit, Action::Digit(2)),
             (TileLabel::Text("3"), TileKind::Digit, Action::Digit(3)),
-            (TileLabel::Text("+"), TileKind::Op, Action::Opset(Op::Add)),
-            // Row 5: 0 . = ±
+            (TileLabel::Text("±"), TileKind::Util, Action::Negate),
+            (TileLabel::Text("="), TileKind::Equals, Action::Equals),
+            // Row 5: 0 .
             (TileLabel::Text("0"), TileKind::Digit, Action::Digit(0)),
             (TileLabel::Text(dec), TileKind::Digit, Action::Dot),
-            (TileLabel::Text("="), TileKind::Equals, Action::Equals),
+        ]
+    }
+
+    fn tile_specs_sci(&self) -> Vec<(TileLabel, TileKind, Action)> {
+        let dec = i18n::dec_sep(self.lang);
+        vec![
+            // Row 0: % CE C ⌫
+            (TileLabel::Text("%"), TileKind::Util, Action::Percent),
+            (TileLabel::Text("CE"), TileKind::Util, Action::ClearEntry),
+            (TileLabel::Text("C"), TileKind::Util, Action::Clear),
+            (TileLabel::Text("⌫"), TileKind::Util, Action::Back),
+            // Row 1: 1/x x² √ ÷
+            (TileLabel::Text("1/x"), TileKind::Util, Action::Recip),
+            (TileLabel::Text("x²"), TileKind::Util, Action::Sqr),
+            (TileLabel::Text("√"), TileKind::Util, Action::Sqrt),
+            (TileLabel::Text("÷"), TileKind::Op, Action::Opset(Op::Div)),
+            // Row 2: 7 8 9 ×
+            (TileLabel::Text("7"), TileKind::Digit, Action::Digit(7)),
+            (TileLabel::Text("8"), TileKind::Digit, Action::Digit(8)),
+            (TileLabel::Text("9"), TileKind::Digit, Action::Digit(9)),
+            (TileLabel::Text("×"), TileKind::Op, Action::Opset(Op::Mul)),
+            // Row 3: 4 5 6 −
+            (TileLabel::Text("4"), TileKind::Digit, Action::Digit(4)),
+            (TileLabel::Text("5"), TileKind::Digit, Action::Digit(5)),
+            (TileLabel::Text("6"), TileKind::Digit, Action::Digit(6)),
+            (TileLabel::Text("−"), TileKind::Op, Action::Opset(Op::Sub)),
+            // Row 4: 1 2 3 ± = log ln
+            (TileLabel::Text("1"), TileKind::Digit, Action::Digit(1)),
+            (TileLabel::Text("2"), TileKind::Digit, Action::Digit(2)),
+            (TileLabel::Text("3"), TileKind::Digit, Action::Digit(3)),
             (TileLabel::Text("±"), TileKind::Util, Action::Negate),
+            (TileLabel::Text("="), TileKind::Equals, Action::Equals),
+            (TileLabel::Text("log"), TileKind::Sci, Action::Log),
+            (TileLabel::Text("ln"), TileKind::Sci, Action::Ln),
+            // Row 5: 0 . sin cos tan
+            (TileLabel::Text("0"), TileKind::Digit, Action::Digit(0)),
+            (TileLabel::Text(dec), TileKind::Digit, Action::Dot),
+            (TileLabel::Text("sin"), TileKind::Sci, Action::Sin),
+            (TileLabel::Text("cos"), TileKind::Sci, Action::Cos),
+            (TileLabel::Text("tan"), TileKind::Sci, Action::Tan),
         ]
     }
 
@@ -1609,12 +1681,12 @@ impl MetroCalcApp {
         let disp = Rect::from_xywh(16.0, self.top_h() + 8.0, content_w - 32.0, disp_h);
         self.build_display(fr, pal, disp, now);
 
-        // Keypad fixed at four columns (4 cols × 6 rows), 4px gap;
+        // Keypad fixed at five columns (5 cols × 5 rows), 4px gap;
         // when rows exceed the visible height, pan with real wheel/drag —
         // tiles are never clipped or overlapped
         let gap = 4.0f32;
-        let n = 24.0f32;
-        let cols = 4.0f32;
+        let n = 25.0f32;
+        let cols = 5.0f32;
         let rows_n = (n / cols).ceil();
         let min_th = 44.0;
         let grid_top = disp.bottom + 16.0;
@@ -1633,7 +1705,11 @@ impl MetroCalcApp {
         };
 
         let tw = (content_w - gap * (cols - 1.0)) / cols;
-        let specs = self.tile_specs();
+        let specs = match self.page {
+            Page::Calc => self.tile_specs(),
+            Page::CalcSci => self.tile_specs_sci(),
+            _ => return,
+        };
         for idx in 0..specs.len() {
             let col = (idx as f32 % cols) * (tw + gap);
             let row = (idx as f32 / cols).floor();
@@ -1937,6 +2013,7 @@ impl MetroCalcApp {
         let title_of = |page: Page| match page {
             Page::Start => s.app_name,
             Page::Calc => s.nav_calc,
+            Page::CalcSci => s.nav_calc,
             Page::Help => s.nav_help,
             Page::Settings => s.nav_settings,
         };
@@ -1986,7 +2063,7 @@ impl MetroCalcApp {
             );
         }
 
-        // Right-side buttons (left→right: home, history, help, settings, theme, lang)
+        // Right-side buttons (left→right: home, history, help, settings, theme, lang, sci)
         let (tc, bgc) = (pal.text, pal.bg);
         let bar_y = k * 10.0;
         let icon = k * 38.0;
@@ -1996,7 +2073,8 @@ impl MetroCalcApp {
         let help_x = lw - k * 66.0 - 3.0 * pitch;
         let settings_x = lw - k * 66.0 - 2.0 * pitch;
         let theme_x = lw - k * 66.0 - pitch;
-        let lang_x = lw - k * 66.0;
+        let lang_x = lw - k * 66.0 - 0.0 * pitch;
+        let toggle_sci_x = lw - k * 66.0 - (-1.0 * pitch);
 
         // home (four-color squares, Win8-logo style)
         {
@@ -2067,6 +2145,19 @@ impl MetroCalcApp {
                 key: HitKey::Bar(BarBtn::Settings),
                 rect,
                 act: HitAct::GoTo(Page::Settings),
+            });
+        }
+        // toggle scientific mode
+        {
+            let rect = Rect::from_xywh(toggle_sci_x, bar_y, icon, icon);
+            self.bar_hover(fr, HitKey::Bar(BarBtn::ToggleSci), rect, bgc, tc);
+            let c = rect_center(rect);
+            let s = i18n::strings(self.lang);
+            self.push_text(fr, s.t_scientific, c.0, c.1, TextAlign::Center, k * 16.0, skc(tc, 1.0));
+            fr.regions.push(HitRegion {
+                key: HitKey::Bar(BarBtn::ToggleSci),
+                rect,
+                act: HitAct::ToggleSci,
             });
         }
         // theme half-moon
@@ -2901,6 +2992,7 @@ impl ApplicationHandler for MetroCalcApp {
                             Page::Help => self.help_scroll = s0 + d,
                             Page::Settings => self.set_scroll = s0 + d,
                             Page::Calc => self.calc_scroll = s0 + d,
+                            Page::CalcSci => self.calc_scroll = s0 + d,
                         }
                     }
                 }
@@ -2939,6 +3031,7 @@ impl ApplicationHandler for MetroCalcApp {
                                 Page::Help => self.help_scroll,
                                 Page::Settings => self.set_scroll,
                                 Page::Calc => self.calc_scroll,
+                                Page::CalcSci => self.calc_scroll,
                             };
                             self.drag = Some((false, self.pointer.1, sc));
                         }
@@ -2976,6 +3069,7 @@ impl ApplicationHandler for MetroCalcApp {
                         Page::Help => self.help_scroll -= dy,
                         Page::Settings => self.set_scroll -= dy,
                         Page::Calc => self.calc_scroll -= dy, // vertical scroll when the window is too short
+                        Page::CalcSci => self.calc_scroll -= dy,
                     }
                 }
                 self.dirty = true;

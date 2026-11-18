@@ -112,6 +112,7 @@ pub enum TileKind {
     Op,
     Util,
     Equals,
+    Sci,
 }
 
 impl TileKind {
@@ -121,6 +122,7 @@ impl TileKind {
             TileKind::Op => p.op,
             TileKind::Util => p.util_bg,
             TileKind::Equals => p.equals,
+            TileKind::Sci => p.digit, // use same as digit for consistency
         }
     }
 

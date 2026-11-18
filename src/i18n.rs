@@ -96,6 +96,7 @@ pub struct Strings {
     pub t_clear: &'static str,
     pub t_settings: &'static str,
     pub t_exit: &'static str,
+    pub t_scientific: &'static str,
 }
 
 const ZH: Strings = Strings {
@@ -134,6 +135,7 @@ const ZH: Strings = Strings {
     t_clear: "清除历史",
     t_settings: "全部设置",
     t_exit: "退出",
+    t_scientific: "科学模式",
 };
 
 const EN: Strings = Strings {
@@ -172,6 +174,7 @@ const EN: Strings = Strings {
     t_clear: "Clear history",
     t_settings: "All settings",
     t_exit: "Exit",
+    t_scientific: "Scientific",
 };
 
 const FR: Strings = Strings {
@@ -210,6 +213,7 @@ const FR: Strings = Strings {
     t_clear: "Effacer l'historique",
     t_settings: "Réglages",
     t_exit: "Quitter",
+    t_scientific: "Scientifique",
 };
 
 pub fn strings(lang: Lang) -> &'static Strings {

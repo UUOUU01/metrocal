@@ -53,6 +53,11 @@ pub enum Unary {
     Sqr,
     Sqrt,
     Recip,
+    Log,
+    Ln,
+    Sin,
+    Cos,
+    Tan,
 }
 
 /// Typed expression kept for the small line above the main display.
@@ -329,6 +334,23 @@ impl Engine {
                     Op::Div.apply(1.0, v)
                 }
             }
+            Unary::Log => {
+                if v <= 0.0 {
+                    Err(ErrKey::Invalid)
+                } else {
+                    Ok(v.log10())
+                }
+            }
+            Unary::Ln => {
+                if v <= 0.0 {
+                    Err(ErrKey::Invalid)
+                } else {
+                    Ok(v.ln())
+                }
+            }
+            Unary::Sin => Ok(v.sin()),
+            Unary::Cos => Ok(v.cos()),
+            Unary::Tan => Ok(v.tan()),
         };
         match r {
             Ok(x) => {
@@ -336,6 +358,11 @@ impl Engine {
                     Unary::Sqr => LastExpr::UnarySqr(v),
                     Unary::Sqrt => LastExpr::UnarySqrt(v),
                     Unary::Recip => LastExpr::UnaryRecip(v),
+                    Unary::Log => LastExpr::UnaryRecip(v),
+                    Unary::Ln => LastExpr::UnaryRecip(v),
+                    Unary::Sin => LastExpr::UnaryRecip(v),
+                    Unary::Cos => LastExpr::UnaryRecip(v),
+                    Unary::Tan => LastExpr::UnaryRecip(v),
                 };
                 self.record(expr, x);
                 self.finish(x);
