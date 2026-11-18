@@ -1015,12 +1015,16 @@ impl MetroCalcApp {
         let pressed_key = self.pressed;
         let hover = self.hover;
 
-        // Only update animations for visible regions
-        let visible_keys: std::collections::HashSet<_> = self.regions.iter().map(|r| r.key).collect();
+        // Only update animations for visible regions - use a small array for speed
+        let mut visible_keys = [HitKey::SplashSkip; 50];
+        let n = self.regions.iter().take(50).map(|r| r.key).collect::<Vec<_>>();
+        for (i, &k) in n.iter().enumerate() {
+            visible_keys[i] = k;
+        }
 
         for (k, a) in self.anims.iter_mut() {
             // Skip animations for invisible regions
-            if !visible_keys.contains(k) {
+            if !visible_keys.contains(&k) {
                 continue;
             }
             let ht = if hover == Some(*k) { 1.0 } else { 0.0 };
@@ -1705,7 +1709,7 @@ impl MetroCalcApp {
         // animated, so reflow is smooth)
         let content_w = (lw - self.hist_w.value).max(200.0);
         // Ensure display area has minimum height to show text properly
-        let disp_h = (((lh - self.top_h()) * 0.28).clamp(120.0, 200.0 * s)).max(140.0);
+        let disp_h = (((lh - self.top_h()) * 0.45).clamp(200.0, 280.0 * s)).max(200.0);
         let disp = Rect::from_xywh(16.0, self.top_h() + 8.0, content_w - 32.0, disp_h);
         self.build_display(fr, pal, disp, now);
 
@@ -1716,8 +1720,8 @@ impl MetroCalcApp {
         let n = 20.0f32;
         let cols = 4.0f32;
         let rows_n = (n / cols).ceil();
-        let min_th = 44.0;
-        let grid_top = disp.bottom + 16.0;
+        let min_th = 64.0;
+        let grid_top = disp.bottom + 24.0;
         let avail = (lh - grid_top).max(0.0);
         let needed = rows_n * min_th + (rows_n - 1.0) * gap;
         let th = if avail >= needed {
@@ -2785,8 +2789,12 @@ impl MetroCalcApp {
         // 1. Only keep animations for regions visible in current frame
         // 2. Limit total animations to prevent memory bloat (max 100)
         // 3. Don't re-add animations that already exist
-        let live: std::collections::HashSet<HitKey> = fr_regions.iter().map(|r| r.key).collect();
-        self.anims.retain(|k, _| live.contains(k) || matches!(k, HitKey::Bar(_)));
+        let mut live = [HitKey::SplashSkip; 50];
+        let n = fr_regions.iter().take(50).map(|r| r.key).collect::<Vec<_>>();
+        for (i, &k) in n.iter().enumerate() {
+            live[i] = k;
+        }
+        self.anims.retain(|k, _| live.contains(&k) || matches!(k, HitKey::Bar(_)));
         if self.anims.len() > 100 {
             // Remove oldest animations (simple LRU by iterator order)
             let keys: Vec<_> = self.anims.keys().cloned().collect();
