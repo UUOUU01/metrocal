@@ -12,6 +12,13 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+// Windows API for Mica blur effect
+#[cfg(target_os = "windows")]
+use winapi::um::dwmapi::{
+    DwmExtendFrameIntoClientArea, MARGINS, DWMWA_WINDOW_CORNER_PREFERENCE,
+    DWMWA_MICA_EFFECT,
+};
+
 use glutin::config::{ConfigTemplateBuilder, GlConfig};
 use glutin::context::{ContextApi, ContextAttributesBuilder, PossiblyCurrentContext};
 use glutin::display::{GetGlDisplay, GlDisplay};
@@ -2970,6 +2977,22 @@ impl MetroCalcApp {
             num_samples,
             stencil_size,
         });
+
+        // Apply Mica blur effect on Windows
+        #[cfg(target_os = "windows")]
+        {
+            use raw_window_handle::HasRawWindowHandle;
+            use winit::platform::windows::WindowExtWindows;
+            let hwnd = window.hwnd()?;
+            let margins = MARGINS {
+                cyTopHeight: 1,
+                ..Default::default()
+            };
+            unsafe {
+                let _ = DwmExtendFrameIntoClientArea(hwnd, &margins);
+            }
+        }
+
         self.sync_size();
         Ok(())
     }
@@ -3005,6 +3028,12 @@ fn window_attrs() -> winit::window::WindowAttributes {
         .with_min_inner_size(LogicalSize::new(480.0f64, 360.0f64));
     if let Some(icon) = crate::icon::window_icon() {
         attrs = attrs.with_window_icon(Some(icon));
+    }
+    // Enable Mica (Windows 11 blur effect) on Windows
+    #[cfg(target_os = "windows")]
+    {
+        use winit::platform::windows::WindowAttributesExtWindows;
+        attrs = attrs.with_rgba8888_preferred(true);
     }
     attrs
 }

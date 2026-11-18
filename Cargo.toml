@@ -16,6 +16,8 @@ glutin-winit = "0.5"
 raw-window-handle = "0.6"
 # Present Skia bitmaps to the window (Windows GDI / X11 / Wayland / macOS)
 softbuffer = "0.4.8"
+# Windows API for Mica blur effect
+winapi = { version = "0.3", features = ["winuser", "dwmapi"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
