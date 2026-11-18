@@ -1565,30 +1565,36 @@ impl MetroCalcApp {
     fn tile_specs(&self) -> Vec<(TileLabel, TileKind, Action)> {
         let dec = i18n::dec_sep(self.lang);
         vec![
+            // Row 0: % CE C
             (TileLabel::Text("%"), TileKind::Util, Action::Percent),
             (TileLabel::Text("CE"), TileKind::Util, Action::ClearEntry),
             (TileLabel::Text("C"), TileKind::Util, Action::Clear),
-            (TileLabel::BackIcon, TileKind::Util, Action::Back),
+            (TileLabel::Text("⌫"), TileKind::Util, Action::Back),
+            // Row 1: 1/x x² √
             (TileLabel::Text("1/x"), TileKind::Util, Action::Recip),
             (TileLabel::Text("x²"), TileKind::Util, Action::Sqr),
             (TileLabel::Text("√"), TileKind::Util, Action::Sqrt),
             (TileLabel::Text("÷"), TileKind::Op, Action::Opset(Op::Div)),
+            // Row 2: 7 8 9 ×
             (TileLabel::Text("7"), TileKind::Digit, Action::Digit(7)),
             (TileLabel::Text("8"), TileKind::Digit, Action::Digit(8)),
             (TileLabel::Text("9"), TileKind::Digit, Action::Digit(9)),
             (TileLabel::Text("×"), TileKind::Op, Action::Opset(Op::Mul)),
+            // Row 3: 4 5 6 −
             (TileLabel::Text("4"), TileKind::Digit, Action::Digit(4)),
             (TileLabel::Text("5"), TileKind::Digit, Action::Digit(5)),
             (TileLabel::Text("6"), TileKind::Digit, Action::Digit(6)),
             (TileLabel::Text("−"), TileKind::Op, Action::Opset(Op::Sub)),
+            // Row 4: 1 2 3 +
             (TileLabel::Text("1"), TileKind::Digit, Action::Digit(1)),
             (TileLabel::Text("2"), TileKind::Digit, Action::Digit(2)),
             (TileLabel::Text("3"), TileKind::Digit, Action::Digit(3)),
             (TileLabel::Text("+"), TileKind::Op, Action::Opset(Op::Add)),
-            (TileLabel::Text("±"), TileKind::Util, Action::Negate),
+            // Row 5: 0 . = ±
             (TileLabel::Text("0"), TileKind::Digit, Action::Digit(0)),
             (TileLabel::Text(dec), TileKind::Digit, Action::Dot),
             (TileLabel::Text("="), TileKind::Equals, Action::Equals),
+            (TileLabel::Text("±"), TileKind::Util, Action::Negate),
         ]
     }
 
@@ -1603,12 +1609,12 @@ impl MetroCalcApp {
         let disp = Rect::from_xywh(16.0, self.top_h() + 8.0, content_w - 32.0, disp_h);
         self.build_display(fr, pal, disp, now);
 
-        // Keypad fixed at two columns (2 cols × 12 rows), 4px gap;
+        // Keypad fixed at four columns (4 cols × 6 rows), 4px gap;
         // when rows exceed the visible height, pan with real wheel/drag —
         // tiles are never clipped or overlapped
         let gap = 4.0f32;
         let n = 24.0f32;
-        let cols = 2.0f32;
+        let cols = 4.0f32;
         let rows_n = (n / cols).ceil();
         let min_th = 44.0;
         let grid_top = disp.bottom + 16.0;
