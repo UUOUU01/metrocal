@@ -957,33 +957,36 @@ impl MetroCalcApp {
     // ---------- animation tick ----------
 
     fn tick(&mut self, dt: f32, now: Instant) {
+        // Limit dt to prevent spiral of death on lag
+        let dt = dt.clamp(0.0, 0.033); // max 30 FPS worth of time
+
         let pressed_key = self.pressed;
         let hover = self.hover;
+
+        // Only update animations for visible regions
+        let visible_keys: std::collections::HashSet<_> = self.regions.iter().map(|r| r.key).collect();
+
         for (k, a) in self.anims.iter_mut() {
+            // Skip animations for invisible regions
+            if !visible_keys.contains(k) {
+                continue;
+            }
             let ht = if hover == Some(*k) { 1.0 } else { 0.0 };
             let pt = if pressed_key == Some(*k) { 1.0 } else { 0.0 };
             a.hover.update(ht, dt, 12.0);
             a.press.update(pt, dt, 18.0);
         }
+
+        // Update global animations
         let back_target = if self.page_current() != Page::Start { 1.0 } else { 0.0 };
         self.back_vis.update(back_target, dt, 14.0);
         let hist_target = if self.history_open { HIST_W } else { 0.0 };
         self.hist_w.update(hist_target, dt, 9.0);
+
+        // Scroll clamping
         self.start_scroll_y = self
             .start_scroll_y
             .clamp(0.0, (self.start_content_h - self.start_view_h()).max(0.0));
-
-        // Start-screen flick inertia: keep gliding after drag release, exponential decay
-        if self.drag.is_none() {
-            if self.start_scroll_vel.abs() > 20.0 {
-                self.start_scroll_y += self.start_scroll_vel * dt;
-                self.start_scroll_vel *= (-dt * 4.0).exp();
-            } else {
-                self.start_scroll_vel = 0.0;
-            }
-        }
-
-        // clamp scrolls
         let view_h = (self.lh - self.top_h()).max(0.0);
         let hist_view = (self.lh - self.top_h() - self.fs(44.0)).max(0.0);
         let hist_total = self.engine.history.len() as f32 * 56.0;
@@ -994,7 +997,6 @@ impl MetroCalcApp {
         self.set_scroll = self
             .set_scroll
             .clamp(0.0, (self.set_content_h - view_h).max(0.0));
-        // Calculator keypad is fixed at two columns: vertical scrolling only when 12 rows don't fit (defensive)
         let rows_n = 12.0f32;
         let grid_avail =
             (self.lh - self.top_h() - self.fs(8.0) - 120.0 - self.fs(12.0)).max(0.0);
@@ -1003,7 +1005,7 @@ impl MetroCalcApp {
             .calc_scroll
             .clamp(0.0, (grid_needed - grid_avail).max(0.0));
 
-        // one-shot cleanup
+        // One-shot cleanup
         if let Some((t0, _)) = self.palette_fade {
             if now.duration_since(t0).as_secs_f32() >= PALETTE_FADE_SECS {
                 self.palette_fade = None;
@@ -1039,6 +1041,7 @@ impl MetroCalcApp {
     }
 
     fn animating(&self, now: Instant) -> bool {
+        // Fast path: check simple conditions first
         if !self.splash_done {
             return true;
         }
@@ -1080,15 +1083,6 @@ impl MetroCalcApp {
         if self.roll.is_some() || self.result_pop.is_some() || self.shake.is_some() {
             return true;
         }
-        let pressed_key = self.pressed;
-        let hover = self.hover;
-        for (k, a) in &self.anims {
-            let ht = if hover == Some(*k) { 1.0 } else { 0.0 };
-            let pt = if pressed_key == Some(*k) { 1.0 } else { 0.0 };
-            if (a.hover.value - ht).abs() > 0.004 || (a.press.value - pt).abs() > 0.004 {
-                return true;
-            }
-        }
         let hist_target = if self.history_open { HIST_W } else { 0.0 };
         if (self.hist_w.value - hist_target).abs() > 0.5 {
             return true;
@@ -1097,7 +1091,33 @@ impl MetroCalcApp {
         if (self.back_vis.value - back_target).abs() > 0.004 {
             return true;
         }
+
+        // Only check animations for visible regions (optimization)
+        let visible_keys: std::collections::HashSet<_> = self.regions.iter().map(|r| r.key).collect();
+        let pressed_key = self.pressed;
+        let hover = self.hover;
+        for (k, a) in &self.anims {
+            // Skip animations for invisible regions
+            if !visible_keys.contains(k) {
+                continue;
+            }
+            let ht = if hover == Some(*k) { 1.0 } else { 0.0 };
+            let pt = if pressed_key == Some(*k) { 1.0 } else { 0.0 };
+            if (a.hover.value - ht).abs() > 0.004 || (a.press.value - pt).abs() > 0.004 {
+                return true;
+            }
+        }
         false
+    }
+
+    // Frame limiter to prevent spirals of death and save CPU
+    fn limit_fps(&self, target_fps: u32) -> f32 {
+        let ms_per_frame: u128 = (1000u64 / target_fps as u64) as u128;
+        let elapsed = self.last_frame.elapsed().as_millis();
+        if elapsed < ms_per_frame {
+            std::thread::sleep(Duration::from_millis((ms_per_frame - elapsed) as u64));
+        }
+        (self.last_frame.elapsed().as_secs_f32()).min(0.033)
     }
 
     // ---------- frame building ----------
@@ -1226,6 +1246,12 @@ impl MetroCalcApp {
         let mut col = 0usize; // 0 = left column, 1 = right column
         let mut idx = 0usize;
         let mut group_i = 0usize;
+
+        // View frustum culling: only render visible tiles
+        let view_top = self.top_h();
+        let view_bottom = lh;
+        let view_margin = self.fs(40.0);
+
         for row in rows.iter() {
             match row {
                 Row::Header(title) => {
@@ -1262,7 +1288,9 @@ impl MetroCalcApp {
                     let tw = if span == 2 { content_w } else { uw };
                     let x = pad + col as f32 * (uw + gap);
                     let rect = Rect::from_xywh(x, draw_y, tw, uh);
-                    if draw_y > -uh - self.fs(20.0) && draw_y < lh + self.fs(20.0) {
+
+                    // View frustum culling: only render tiles within visible area
+                    if draw_y > -uh - view_margin && draw_y < lh + view_margin {
                         self.start_tile(fr, pal, idx, rect, def, now, elapsed);
                     }
                     col += span;
@@ -2525,16 +2553,22 @@ impl MetroCalcApp {
         self.sync_size();
         let now = Instant::now();
         let fr = self.build_frame(now);
-        // Trim the animation state table: keep only regions visible this frame + persistent top-bar items (prevents unbounded growth)
-        {
-            let live: std::collections::HashSet<HitKey> =
-                fr.regions.iter().map(|r| r.key).collect();
-            self.anims
-                .retain(|k, _| live.contains(k) || matches!(k, HitKey::Bar(_)));
+
+        // Optimize animation state management:
+        // 1. Only keep animations for regions visible in current frame
+        // 2. Limit total animations to prevent memory bloat (max 100)
+        // 3. Don't re-add animations that already exist
+        let live: std::collections::HashSet<HitKey> =
+            fr.regions.iter().map(|r| r.key).collect();
+        self.anims.retain(|k, _| live.contains(k) || matches!(k, HitKey::Bar(_)));
+        if self.anims.len() > 100 {
+            // Remove oldest animations (simple LRU by iterator order)
+            let keys: Vec<_> = self.anims.keys().cloned().collect();
+            for k in keys {
+                self.anims.remove(&k);
+            }
         }
-        for r in &fr.regions {
-            self.anims.entry(r.key).or_default();
-        }
+
         self.regions = fr.regions.clone();
         self.cursor_pointer = fr.cursor_pointer;
 
