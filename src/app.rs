@@ -835,6 +835,10 @@ impl MetroCalcApp {
     }
 
     fn hit_test(&self, x: f32, y: f32) -> Option<&HitRegion> {
+        // If regions is empty (render() not called yet), return None
+        if self.regions.is_empty() {
+            return None;
+        }
         self.regions.iter().rev().find(|r| rect_contains(r.rect, x, y))
     }
 
@@ -1126,6 +1130,13 @@ impl MetroCalcApp {
         let dt = (now - self.last_frame).as_secs_f32().clamp(0.0, 0.1);
         self.last_frame = now;
         self.tick(dt, now);
+        let mut fr = self.build_frame_without_regions(now);
+        fr.cursor_pointer = self.hover.is_some();
+        fr
+    }
+
+    // Build frame without updating last_frame/tick - used before regions are finalized
+    fn build_frame_without_regions(&mut self, now: Instant) -> Frame {
         let mut fr = Frame::default();
         let pal = self.pal();
         let lw = self.lw;
@@ -1167,7 +1178,6 @@ impl MetroCalcApp {
             fr.regions
                 .retain(|r| matches!(r.key, HitKey::Bar(_) | HitKey::SplashSkip));
         }
-        fr.cursor_pointer = self.hover.is_some();
         fr
     }
 
@@ -1588,7 +1598,8 @@ impl MetroCalcApp {
         // available width = window width - panel width (panel width itself is
         // animated, so reflow is smooth)
         let content_w = (lw - self.hist_w.value).max(200.0);
-        let disp_h = (((lh - self.top_h()) * 0.28).clamp(120.0, 200.0 * s)).max(100.0);
+        // Ensure display area has minimum height to show text properly
+        let disp_h = (((lh - self.top_h()) * 0.28).clamp(120.0, 200.0 * s)).max(140.0);
         let disp = Rect::from_xywh(16.0, self.top_h() + 8.0, content_w - 32.0, disp_h);
         self.build_display(fr, pal, disp, now);
 
@@ -1808,11 +1819,16 @@ impl MetroCalcApp {
             }
         }
 
+        // Ensure text is fully visible within the display rectangle
+        let text_bottom = rect.bottom - 18.0;
+        let text_top = text_bottom - size * 0.8; // Account for font metrics
+        let actual_y = text_top.max(rect.top + self.fs(10.0));
+
         self.push_text(
             fr,
             &text,
             rect.right + shake_x,
-            rect.bottom - 18.0,
+            actual_y,
             TextAlign::Right,
             size,
             skc(if is_err { pal.error } else { pal.text }, 1.0),
@@ -2552,14 +2568,21 @@ impl MetroCalcApp {
     fn render(&mut self) {
         self.sync_size();
         let now = Instant::now();
-        let fr = self.build_frame(now);
+
+        // First, update animation state without modifying regions
+        let dt = (now - self.last_frame).as_secs_f32().clamp(0.0, 0.1);
+        self.last_frame = now;
+        self.tick(dt, now);
+
+        // Build the frame and get hit regions
+        let mut fr = self.build_frame_without_regions(now);
+        let fr_regions = std::mem::take(&mut fr.regions);
 
         // Optimize animation state management:
         // 1. Only keep animations for regions visible in current frame
         // 2. Limit total animations to prevent memory bloat (max 100)
         // 3. Don't re-add animations that already exist
-        let live: std::collections::HashSet<HitKey> =
-            fr.regions.iter().map(|r| r.key).collect();
+        let live: std::collections::HashSet<HitKey> = fr_regions.iter().map(|r| r.key).collect();
         self.anims.retain(|k, _| live.contains(k) || matches!(k, HitKey::Bar(_)));
         if self.anims.len() > 100 {
             // Remove oldest animations (simple LRU by iterator order)
@@ -2569,7 +2592,7 @@ impl MetroCalcApp {
             }
         }
 
-        self.regions = fr.regions.clone();
+        self.regions = fr_regions;
         self.cursor_pointer = fr.cursor_pointer;
 
         // Must clear the canvas every frame: no leftover content from the previous frame (otherwise ghosting / barcode artifacts)
