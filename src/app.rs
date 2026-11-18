@@ -98,7 +98,16 @@ enum BarBtn {
     Settings,
     Help,
     History,
-    ToggleSci,
+    Menu,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+enum MenuItem {
+    Scientific,
+    Theme,
+    Lang,
+    Settings,
+    Help,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -106,14 +115,15 @@ enum HitKey {
     Tile(u64, usize),
     StartTile(u64, usize),
     Bar(BarBtn),
+    Menu(MenuItem),
     Lang(Lang),
     ThemeOpt(Theme),
     Accent(usize),
     HistItem(u64),
     HistClear,
     SetClear,
-    ToggleSci,
     SplashSkip,
+    Exit,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -129,7 +139,7 @@ enum HitAct {
     SetAccent(usize),
     LoadHist(u64),
     ClearHist,
-    ToggleSci,
+    ToggleMenu,
     SkipSplash,
     Exit,
 }
@@ -364,6 +374,7 @@ struct Settings {
     lang: String,
     theme: String,
     accent: usize,
+    scientific: bool,
     history: Vec<crate::engine::HistoryItem>,
 }
 
@@ -393,6 +404,7 @@ pub struct MetroCalcApp {
     lang: Lang,
     theme: Theme,
     accent_idx: usize,
+    scientific_mode: bool,
     page: Page,
     page_switch: Option<(Instant, Page, Page)>,
     history_open: bool,
@@ -446,6 +458,9 @@ pub struct MetroCalcApp {
 
     tf_display: Option<Typeface>,
     tf_body: Option<Typeface>,
+
+    menu_open: bool,
+    menu_anim: Smooth,
 
     backend: Option<Backend>,
     surface_size: (u32, u32),
@@ -535,6 +550,9 @@ impl MetroCalcApp {
             surface_size: (0, 0),
             dirty: true,
             window: None,
+            menu_open: false,
+            scientific_mode: false,
+            menu_anim: Smooth::default(),
         };
         if let Some(path) = &settings_path {
             if let Ok(text) = std::fs::read_to_string(path) {
@@ -543,6 +561,7 @@ impl MetroCalcApp {
                     app.theme = Theme::from_code(&st.theme);
                     app.accent_idx = st.accent.min(theme::ACCENTS.len() - 1);
                     app.engine.set_history(st.history);
+                    app.scientific_mode = st.scientific;
                 }
             }
         }
@@ -582,6 +601,7 @@ impl MetroCalcApp {
             lang: self.lang.code().to_owned(),
             theme: self.theme.code().to_owned(),
             accent: self.accent_idx,
+            scientific: self.scientific_mode,
             history: self.engine.history.clone(),
         };
         if let Ok(json) = serde_json::to_string_pretty(&st) {
@@ -742,13 +762,9 @@ impl MetroCalcApp {
                 self.save_settings();
                 self.dirty = true;
             }
-            HitAct::ToggleSci => {
-                let new_page = match self.page_current() {
-                    Page::Calc => Page::CalcSci,
-                    Page::CalcSci => Page::Calc,
-                    _ => return,
-                };
-                self.go_to(now, new_page);
+            HitAct::ToggleMenu => {
+                self.menu_open = !self.menu_open;
+                self.dirty = true;
             }
             HitAct::SkipSplash => {
                 self.splash_done = true;
@@ -1018,6 +1034,8 @@ impl MetroCalcApp {
         self.back_vis.update(back_target, dt, 14.0);
         let hist_target = if self.history_open { HIST_W } else { 0.0 };
         self.hist_w.update(hist_target, dt, 9.0);
+        let menu_target = if self.menu_open { 1.0 } else { 0.0 };
+        self.menu_anim.update(menu_target, dt, 10.0);
 
         // Scroll clamping
         self.start_scroll_y = self
@@ -1199,6 +1217,7 @@ impl MetroCalcApp {
         fr.pop();
 
         self.build_top_bar(&mut fr, &pal, lw, now);
+        self.build_menu(&mut fr, &pal, lw, lh, now);
         self.build_history(&mut fr, &pal, lw, lh, now);
         // Ripples drawn once, above every page and the top bar (each clipped to its button)
         self.build_ripples(&mut fr, now);
@@ -1597,6 +1616,15 @@ impl MetroCalcApp {
 
     fn tile_specs(&self) -> Vec<(TileLabel, TileKind, Action)> {
         let dec = i18n::dec_sep(self.lang);
+        if self.scientific_mode {
+            self.tile_specs_sci()
+        } else {
+            self.tile_specs_basic()
+        }
+    }
+
+    fn tile_specs_basic(&self) -> Vec<(TileLabel, TileKind, Action)> {
+        let dec = i18n::dec_sep(self.lang);
         vec![
             // Row 0: % CE C ⌫
             (TileLabel::Text("%"), TileKind::Util, Action::Percent),
@@ -1659,14 +1687,14 @@ impl MetroCalcApp {
             (TileLabel::Text("3"), TileKind::Digit, Action::Digit(3)),
             (TileLabel::Text("±"), TileKind::Util, Action::Negate),
             (TileLabel::Text("="), TileKind::Equals, Action::Equals),
-            (TileLabel::Text("log"), TileKind::Sci, Action::Log),
-            (TileLabel::Text("ln"), TileKind::Sci, Action::Ln),
+            (TileLabel::Text("log"), TileKind::Util, Action::Log),
+            (TileLabel::Text("ln"), TileKind::Util, Action::Ln),
             // Row 5: 0 . sin cos tan
             (TileLabel::Text("0"), TileKind::Digit, Action::Digit(0)),
             (TileLabel::Text(dec), TileKind::Digit, Action::Dot),
-            (TileLabel::Text("sin"), TileKind::Sci, Action::Sin),
-            (TileLabel::Text("cos"), TileKind::Sci, Action::Cos),
-            (TileLabel::Text("tan"), TileKind::Sci, Action::Tan),
+            (TileLabel::Text("sin"), TileKind::Util, Action::Sin),
+            (TileLabel::Text("cos"), TileKind::Util, Action::Cos),
+            (TileLabel::Text("tan"), TileKind::Util, Action::Tan),
         ]
     }
 
@@ -1681,12 +1709,12 @@ impl MetroCalcApp {
         let disp = Rect::from_xywh(16.0, self.top_h() + 8.0, content_w - 32.0, disp_h);
         self.build_display(fr, pal, disp, now);
 
-        // Keypad fixed at five columns (5 cols × 5 rows), 4px gap;
+        // Keypad fixed at four columns (4 cols × 5 rows), 4px gap;
         // when rows exceed the visible height, pan with real wheel/drag —
         // tiles are never clipped or overlapped
         let gap = 4.0f32;
-        let n = 25.0f32;
-        let cols = 5.0f32;
+        let n = 20.0f32;
+        let cols = 4.0f32;
         let rows_n = (n / cols).ceil();
         let min_th = 44.0;
         let grid_top = disp.bottom + 16.0;
@@ -1705,11 +1733,7 @@ impl MetroCalcApp {
         };
 
         let tw = (content_w - gap * (cols - 1.0)) / cols;
-        let specs = match self.page {
-            Page::Calc => self.tile_specs(),
-            Page::CalcSci => self.tile_specs_sci(),
-            _ => return,
-        };
+        let specs = self.tile_specs();
         for idx in 0..specs.len() {
             let col = (idx as f32 % cols) * (tw + gap);
             let row = (idx as f32 / cols).floor();
@@ -2063,7 +2087,7 @@ impl MetroCalcApp {
             );
         }
 
-        // Right-side buttons (left→right: home, history, help, settings, theme, lang, sci)
+        // Right-side buttons (left→right: home, history, help, settings, theme, lang, menu)
         let (tc, bgc) = (pal.text, pal.bg);
         let bar_y = k * 10.0;
         let icon = k * 38.0;
@@ -2074,7 +2098,7 @@ impl MetroCalcApp {
         let settings_x = lw - k * 66.0 - 2.0 * pitch;
         let theme_x = lw - k * 66.0 - pitch;
         let lang_x = lw - k * 66.0 - 0.0 * pitch;
-        let toggle_sci_x = lw - k * 66.0 - (-1.0 * pitch);
+        let menu_x = lw - k * 66.0 - (-1.0 * pitch);
 
         // home (four-color squares, Win8-logo style)
         {
@@ -2147,17 +2171,22 @@ impl MetroCalcApp {
                 act: HitAct::GoTo(Page::Settings),
             });
         }
-        // toggle scientific mode
+        // menu button (hamburger icon)
         {
-            let rect = Rect::from_xywh(toggle_sci_x, bar_y, icon, icon);
-            self.bar_hover(fr, HitKey::Bar(BarBtn::ToggleSci), rect, bgc, tc);
+            let rect = Rect::from_xywh(menu_x, bar_y, icon, icon);
+            self.bar_hover(fr, HitKey::Bar(BarBtn::Menu), rect, bgc, tc);
             let c = rect_center(rect);
-            let s = i18n::strings(self.lang);
-            self.push_text(fr, s.t_scientific, c.0, c.1, TextAlign::Center, k * 16.0, skc(tc, 1.0));
+            let w = k * 6.0;
+            let h = k * 1.5;
+            let y1 = c.1 - h;
+            let y2 = c.1 + h;
+            fr.cmds.push(Cmd::Line((c.0 - w, y1).into(), (c.0 + w, y1).into(), skc(tc, 1.0), k * 1.5));
+            fr.cmds.push(Cmd::Line((c.0 - w, y2).into(), (c.0 + w, y2).into(), skc(tc, 1.0), k * 1.5));
+            fr.cmds.push(Cmd::Line((c.0 - w, c.1).into(), (c.0 + w, c.1).into(), skc(tc, 1.0), k * 1.5));
             fr.regions.push(HitRegion {
-                key: HitKey::Bar(BarBtn::ToggleSci),
+                key: HitKey::Bar(BarBtn::Menu),
                 rect,
-                act: HitAct::ToggleSci,
+                act: HitAct::ToggleMenu,
             });
         }
         // theme half-moon
@@ -2190,6 +2219,83 @@ impl MetroCalcApp {
                 act: HitAct::CycleLang,
             });
         }
+    }
+
+    // ---------- menu panel ----------
+
+    fn build_menu(&mut self, fr: &mut Frame, pal: &Palette, lw: f32, lh: f32, now: Instant) {
+        let s = i18n::strings(self.lang);
+        let menu_w = 220.0 * self.ui_scale;
+        let menu_x = lw - menu_w;
+        let menu_y = self.top_h();
+
+        // Menu panel with slide animation
+        let menu_h = if self.menu_anim.value > 0.01 {
+            lh - menu_y
+        } else {
+            0.0
+        };
+
+        fr.push_clip(Rect::from_xywh(menu_x, menu_y, menu_w, lh - menu_y));
+        fr.cmds.push(Cmd::FillRect(
+            Rect::from_xywh(menu_x, menu_y, menu_w, lh - menu_y),
+            skc(pal.panel, 1.0),
+        ));
+
+        // Menu items
+        let items = [
+            (MenuItem::Scientific, s.t_scientific, self.scientific_mode),
+            (MenuItem::Theme, s.theme, false),
+            (MenuItem::Lang, s.language, false),
+            (MenuItem::Settings, s.nav_settings, false),
+            (MenuItem::Help, s.nav_help, false),
+        ];
+
+        let item_h = 48.0 * self.ui_scale;
+        let start_y = menu_y + 60.0 * self.ui_scale;
+
+        for (i, (item, label, checked)) in items.iter().enumerate() {
+            let y = start_y + (i as f32) * item_h;
+            if self.menu_anim.value > 0.5 {
+                let rect = Rect::from_xywh(menu_x + 8.0, y, menu_w - 16.0, item_h - 4.0);
+                self.menu_hover(fr, *item, rect, pal);
+                self.push_text(fr, label, menu_x + 16.0, y + item_h * 0.5, TextAlign::Left, item_h * 0.5, skc(pal.text, 1.0));
+                fr.regions.push(HitRegion {
+                    key: HitKey::Menu(*item),
+                    rect,
+                    act: match item {
+                        MenuItem::Scientific => HitAct::ToggleMenu,
+                        MenuItem::Theme => HitAct::FlipTheme,
+                        MenuItem::Lang => HitAct::CycleLang,
+                        MenuItem::Settings => HitAct::GoTo(Page::Settings),
+                        MenuItem::Help => HitAct::GoTo(Page::Help),
+                    },
+                });
+            }
+        }
+
+        fr.pop();
+    }
+
+    fn menu_hover(&self, fr: &mut Frame, item: MenuItem, rect: Rect, pal: &Palette) {
+        let hovered = if let Some(key) = self.hover {
+            if let HitKey::Menu(i) = key { i == item } else { false }
+        } else {
+            false
+        };
+
+        let pressed = if let Some(key) = self.pressed {
+            if let HitKey::Menu(i) = key { i == item } else { false }
+        } else {
+            false
+        };
+
+        let base = pal.bg;
+        let pressed_color = theme::shade(base, 0.85);
+        let hover_color = theme::shade(base, 0.92);
+        let color = if pressed { pressed_color } else { hover_color };
+
+        fr.cmds.push(Cmd::FillRect(rect, skc(color, 1.0)));
     }
 
     // ---------- history panel ----------
