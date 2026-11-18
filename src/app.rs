@@ -45,6 +45,7 @@ const POP_SECS: f32 = 0.35;
 const SHAKE_SECS: f32 = 0.35;
 const RIPPLE_SECS: f32 = 0.28;
 const HIST_W: f32 = 280.0;
+const PALETTE_FADE_SECS: f32 = 0.30;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Page {
@@ -314,6 +315,25 @@ fn skc(c: Color32, alpha: f32) -> skia_safe::Color {
     skia_safe::Color::from_argb((alpha.clamp(0.0, 1.0) * 255.0) as u8, c.0, c.1, c.2)
 }
 
+/// Cross-fade between two palettes (theme / accent switch animation).
+fn mix_palette(a: &Palette, b: &Palette, t: f32) -> Palette {
+    let m = |x: Color32, y: Color32| theme::mix(x, y, t);
+    Palette {
+        bg: m(a.bg, b.bg),
+        panel: m(a.panel, b.panel),
+        text: m(a.text, b.text),
+        weak: m(a.weak, b.weak),
+        util_bg: m(a.util_bg, b.util_bg),
+        util_text: m(a.util_text, b.util_text),
+        digit: m(a.digit, b.digit),
+        op: m(a.op, b.op),
+        equals: m(a.equals, b.equals),
+        error: m(a.error, b.error),
+        accent: m(a.accent, b.accent),
+        ripple_dark: if t < 0.5 { a.ripple_dark } else { b.ripple_dark },
+    }
+}
+
 fn rect_contains(r: Rect, x: f32, y: f32) -> bool {
     x >= r.left && x <= r.right && y >= r.top && y <= r.bottom
 }
@@ -377,11 +397,18 @@ pub struct MetroCalcApp {
     result_pop: Option<Instant>,
     shake: Option<Instant>,
     settings_path: Option<PathBuf>,
+    palette_fade: Option<(Instant, Palette)>,
+    hist_open_at: Option<Instant>,
+    page_enter: Instant,
+    last_move: Instant,
+    anim_flag: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    settings_tx: Option<std::sync::mpsc::Sender<(PathBuf, String)>>,
 
     start_scroll_y: f32,
     start_content_h: f32,
     calc_scroll: f32,
     drag: Option<(bool, f32, f32)>,
+    start_scroll_vel: f32,
     ui_scale: f32,
     quit: bool,
 
@@ -426,6 +453,20 @@ impl MetroCalcApp {
             tf_display.is_some(),
             tf_body.is_some()
         );
+        // Background settings writer: a single dedicated thread owns all
+        // settings/history disk I/O so the UI thread never blocks on writes.
+        let settings_tx = settings_path.clone().map(|_| {
+            let (tx, rx) = std::sync::mpsc::channel::<(PathBuf, String)>();
+            std::thread::spawn(move || {
+                while let Ok((path, json)) = rx.recv() {
+                    if let Some(dir) = path.parent() {
+                        let _ = std::fs::create_dir_all(dir);
+                    }
+                    let _ = std::fs::write(&path, json);
+                }
+            });
+            tx
+        });
         let mut app = Self {
             engine: Engine::new(),
             lang: Lang::En,
@@ -445,10 +486,17 @@ impl MetroCalcApp {
             result_pop: None,
             shake: None,
             settings_path: settings_path.clone(),
+            palette_fade: None,
+            hist_open_at: None,
+            page_enter: Instant::now(),
+            last_move: Instant::now(),
+            anim_flag: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            settings_tx,
             start_scroll_y: 0.0,
             start_content_h: 0.0,
             calc_scroll: 0.0,
             drag: None,
+            start_scroll_vel: 0.0,
             ui_scale: 1.0,
             quit: false,
             anims: HashMap::new(),
@@ -492,7 +540,15 @@ impl MetroCalcApp {
     }
 
     fn pal(&self) -> Palette {
-        theme::pal(self.theme, self.accent_idx)
+        let target = theme::pal(self.theme, self.accent_idx);
+        match self.palette_fade {
+            Some((t0, from)) => {
+                let t =
+                    (Instant::now().duration_since(t0).as_secs_f32() / PALETTE_FADE_SECS).min(1.0);
+                mix_palette(&from, &target, theme::ease_out(t))
+            }
+            None => target,
+        }
     }
 
     /// Top bar height scales with the window.
@@ -518,11 +574,10 @@ impl MetroCalcApp {
             accent: self.accent_idx,
             history: self.engine.history.clone(),
         };
-        if let Some(dir) = path.parent() {
-            let _ = std::fs::create_dir_all(dir);
-        }
         if let Ok(json) = serde_json::to_string_pretty(&st) {
-            let _ = std::fs::write(path, json);
+            if let Some(tx) = &self.settings_tx {
+                let _ = tx.send((path.clone(), json)); // writer thread persists off the UI thread
+            }
         }
     }
 
@@ -532,6 +587,7 @@ impl MetroCalcApp {
         }
         self.focus = None; // clear keyboard focus on page switch
         self.page_switch = Some((now, self.page_current(), page));
+        self.page_enter = now;
         self.dirty = true;
     }
 
@@ -604,16 +660,22 @@ impl MetroCalcApp {
             HitAct::GoTo(p) => self.go_to(now, p),
             HitAct::ToggleHist => {
                 self.history_open = !self.history_open;
+                if self.history_open {
+                    self.hist_open_at = Some(now); // items stagger slide-in from open time
+                }
                 self.dirty = true;
             }
             HitAct::OpenCalcHistory => {
                 self.go_to(now, Page::Calc);
                 self.history_open = true;
+                self.hist_open_at = Some(now);
                 self.dirty = true;
             }
             HitAct::CycleLang => self.cycle_lang(now),
             HitAct::FlipTheme => {
+                let from = self.pal();
                 self.theme = self.theme.flip();
+                self.palette_fade = Some((now, from)); // cross-fade to the new palette
                 self.save_settings();
                 self.dirty = true;
             }
@@ -628,14 +690,18 @@ impl MetroCalcApp {
             }
             HitAct::SetTheme(t) => {
                 if self.theme != t {
+                    let from = self.pal();
                     self.theme = t;
+                    self.palette_fade = Some((now, from)); // cross-fade to the new palette
                     self.save_settings();
                     self.dirty = true;
                 }
             }
             HitAct::SetAccent(i) => {
                 if self.accent_idx != i {
+                    let from = self.pal();
                     self.accent_idx = i;
+                    self.palette_fade = Some((now, from)); // cross-fade to the new accent
                     self.save_settings();
                     self.dirty = true;
                 }
@@ -755,6 +821,9 @@ impl MetroCalcApp {
                         '=' if on_calc => self.run_action(Action::Equals, now),
                         'h' | 'H' => {
                             self.history_open = !self.history_open;
+                            if self.history_open {
+                                self.hist_open_at = Some(now);
+                            }
                             self.dirty = true;
                         }
                         _ => {}
@@ -904,6 +973,16 @@ impl MetroCalcApp {
             .start_scroll_y
             .clamp(0.0, (self.start_content_h - self.start_view_h()).max(0.0));
 
+        // Start-screen flick inertia: keep gliding after drag release, exponential decay
+        if self.drag.is_none() {
+            if self.start_scroll_vel.abs() > 20.0 {
+                self.start_scroll_y += self.start_scroll_vel * dt;
+                self.start_scroll_vel *= (-dt * 4.0).exp();
+            } else {
+                self.start_scroll_vel = 0.0;
+            }
+        }
+
         // clamp scrolls
         let view_h = (self.lh - self.top_h()).max(0.0);
         let hist_view = (self.lh - self.top_h() - self.fs(44.0)).max(0.0);
@@ -925,6 +1004,11 @@ impl MetroCalcApp {
             .clamp(0.0, (grid_needed - grid_avail).max(0.0));
 
         // one-shot cleanup
+        if let Some((t0, _)) = self.palette_fade {
+            if now.duration_since(t0).as_secs_f32() >= PALETTE_FADE_SECS {
+                self.palette_fade = None;
+            }
+        }
         if let Some((_, t0)) = self.roll {
             if now.duration_since(t0).as_secs_f32() >= ROLL_SECS {
                 self.roll = None;
@@ -960,6 +1044,24 @@ impl MetroCalcApp {
         }
         if self.page_switch.is_some() {
             return true;
+        }
+        if self.palette_fade.is_some() {
+            return true; // theme / accent cross-fade
+        }
+        if self.start_scroll_vel.abs() > 20.0 {
+            return true; // start-screen flick inertia
+        }
+        if self.history_open {
+            if let Some(t0) = self.hist_open_at {
+                if now.duration_since(t0).as_secs_f32() < 0.8 {
+                    return true; // history items stagger slide-in
+                }
+            }
+        }
+        if self.page_current() == Page::Settings
+            && now.duration_since(self.page_enter).as_secs_f32() < 1.0
+        {
+            return true; // settings sections stagger entrance
         }
         // Live tile flip on the Start screen (every 5s, flip lasts 0.6s)
         if self.page_current() == Page::Start {
@@ -1034,7 +1136,9 @@ impl MetroCalcApp {
         fr.pop();
 
         self.build_top_bar(&mut fr, &pal, lw, now);
-        self.build_history(&mut fr, &pal, lw, lh);
+        self.build_history(&mut fr, &pal, lw, lh, now);
+        // Ripples drawn once, above every page and the top bar (each clipped to its button)
+        self.build_ripples(&mut fr, now);
         self.build_splash(&mut fr, &pal, lw, lh, now);
         // Lock page hit regions during the slide transition:
         // both pages are moving at once, so clicks should only hit the top bar /
@@ -1060,7 +1164,7 @@ impl MetroCalcApp {
             Page::Start => self.build_start(fr, pal, lw, lh, now),
             Page::Calc => self.build_calc(fr, pal, lw, lh, now),
             Page::Help => self.build_help(fr, pal, lw, lh),
-            Page::Settings => self.build_settings(fr, pal, lw, lh),
+            Page::Settings => self.build_settings(fr, pal, lw, lh, now),
         }
     }
 
@@ -1492,7 +1596,6 @@ impl MetroCalcApp {
             let (label, kind, action) = specs[idx];
             self.build_tile(fr, pal, idx, rect, label, kind, action, now);
         }
-        self.build_ripples(fr, now);
     }
 
     fn build_tile(
@@ -1781,22 +1884,57 @@ impl MetroCalcApp {
         }
 
         let title_x = k * 14.0 + k * 44.0 * ap;
-        let title = match self.page_current() {
+        let title_of = |page: Page| match page {
             Page::Start => s.app_name,
             Page::Calc => s.nav_calc,
             Page::Help => s.nav_help,
             Page::Settings => s.nav_settings,
         };
-        let tw = self.push_text(fr, title, title_x, k * 29.0, TextAlign::Left, k * 36.0, skc(pal.text, 1.0));
-        self.push_text(
-            fr,
-            s.tagline,
-            title_x + tw + k * 12.0,
-            k * 29.0,
-            TextAlign::Left,
-            k * 15.0,
-            skc(pal.weak, 1.0),
-        );
+        // Title crossfade during page switches: old slides out left, new slides in from the right
+        if let Some((t0, from, to)) = self.page_switch {
+            let t = (now.duration_since(t0).as_secs_f32() / TRANSITION_SECS).min(1.0);
+            let e = theme::ease_out(t);
+            let slide = k * 26.0;
+            self.push_text(
+                fr,
+                title_of(from),
+                title_x - e * slide,
+                k * 29.0,
+                TextAlign::Left,
+                k * 36.0,
+                skc(theme::mix(pal.bg, pal.text, 1.0 - e), 1.0),
+            );
+            let tw = self.push_text(
+                fr,
+                title_of(to),
+                title_x + (1.0 - e) * slide,
+                k * 29.0,
+                TextAlign::Left,
+                k * 36.0,
+                skc(theme::mix(pal.bg, pal.text, e), 1.0),
+            );
+            self.push_text(
+                fr,
+                s.tagline,
+                title_x + (1.0 - e) * slide + tw + k * 12.0,
+                k * 29.0,
+                TextAlign::Left,
+                k * 15.0,
+                skc(theme::mix(pal.bg, pal.weak, e), 1.0),
+            );
+        } else {
+            let title = title_of(self.page_current());
+            let tw = self.push_text(fr, title, title_x, k * 29.0, TextAlign::Left, k * 36.0, skc(pal.text, 1.0));
+            self.push_text(
+                fr,
+                s.tagline,
+                title_x + tw + k * 12.0,
+                k * 29.0,
+                TextAlign::Left,
+                k * 15.0,
+                skc(pal.weak, 1.0),
+            );
+        }
 
         // Right-side buttons (left→right: home, history, help, settings, theme, lang)
         let (tc, bgc) = (pal.text, pal.bg);
@@ -1809,7 +1947,6 @@ impl MetroCalcApp {
         let settings_x = lw - k * 66.0 - 2.0 * pitch;
         let theme_x = lw - k * 66.0 - pitch;
         let lang_x = lw - k * 66.0;
-        let _ = now;
 
         // home (four-color squares, Win8-logo style)
         {
@@ -1916,7 +2053,7 @@ impl MetroCalcApp {
 
     // ---------- history panel ----------
 
-    fn build_history(&mut self, fr: &mut Frame, pal: &Palette, lw: f32, lh: f32) {
+    fn build_history(&mut self, fr: &mut Frame, pal: &Palette, lw: f32, lh: f32, now: Instant) {
         let w = self.hist_w.value;
         if w <= 4.0 {
             return;
@@ -1992,16 +2129,27 @@ impl MetroCalcApp {
                 if y > lh + 56.0 || y + 56.0 < self.top_h() {
                     continue; // skip items outside the panel's visible range
                 }
-                let rect = Rect::from_xywh(base_x - 12.0, y, HIST_W - 24.0, 54.0);
                 let key = HitKey::HistItem(id);
                 let (hov, _) = self.anim_get(key);
+                // stagger slide-in from the right when the panel opens
+                let slide = self
+                    .hist_open_at
+                    .map(|t0| {
+                        theme::ease_out(
+                            (now.duration_since(t0).as_secs_f32() - i as f32 * 0.03) / 0.28,
+                        )
+                        .clamp(0.0, 1.0)
+                    })
+                    .unwrap_or(1.0);
+                let dx = (1.0 - slide) * self.fs(36.0);
+                let rect = Rect::from_xywh(base_x - 12.0 + dx, y, HIST_W - 24.0, 54.0);
+                let pin = theme::ease_out(at.elapsed().as_secs_f32() / 0.25).max(hov) * slide;
                 if hov > 0.01 {
                     fr.cmds.push(Cmd::FillRect(
                         rect,
                         skc(theme::mix(pal.panel, pal.text, 0.08 * hov), 1.0),
                     ));
                 }
-                let pin = theme::ease_out(at.elapsed().as_secs_f32() / 0.25).max(hov);
                 self.push_text(
                     fr,
                     &expr,
@@ -2072,8 +2220,9 @@ impl MetroCalcApp {
         // Vertical panning via wheel and blank-area drag gesture
     }
 
-    fn build_settings(&mut self, fr: &mut Frame, pal: &Palette, lw: f32, lh: f32) {
+    fn build_settings(&mut self, fr: &mut Frame, pal: &Palette, lw: f32, lh: f32, now: Instant) {
         let s = i18n::strings(self.lang);
+        let elapsed = now.duration_since(self.page_enter).as_secs_f32();
         let k = self.ui_scale;
         let pad = self.fs(24.0);
         let gap = self.fs(8.0);
@@ -2082,7 +2231,9 @@ impl MetroCalcApp {
         fr.push_translate(0.0, -self.set_scroll);
         let mut y = top + self.fs(16.0);
 
-        // language
+        // language — sections stagger in on page entry (hit regions move with the draw)
+        let mut off = (1.0 - theme::ease_out(elapsed / 0.32)) * self.fs(26.0);
+        y += off;
         self.heading(fr, pal, s.language, &mut y);
         let bw = ((lw - 2.0 * pad - 2.0 * gap) / 3.0).max(k * 120.0);
         for (i, l) in Lang::ALL.iter().enumerate() {
@@ -2090,8 +2241,11 @@ impl MetroCalcApp {
             self.select_tile(fr, pal, HitKey::Lang(*l), HitAct::SetLang(*l), rect, l.native(), self.lang == *l);
         }
         y += self.fs(80.0 + 16.0);
+        y -= off;
 
         // theme
+        off = (1.0 - theme::ease_out((elapsed - 0.08) / 0.32)) * self.fs(26.0);
+        y += off;
         self.heading(fr, pal, s.theme, &mut y);
         let bw2 = ((lw - 2.0 * pad - gap) / 2.0).max(k * 120.0);
         let themes = [Theme::Dark, Theme::Light];
@@ -2101,8 +2255,11 @@ impl MetroCalcApp {
             self.select_tile(fr, pal, HitKey::ThemeOpt(*t), HitAct::SetTheme(*t), rect, labels[i], self.theme == *t);
         }
         y += self.fs(80.0 + 16.0);
+        y -= off;
 
         // accent
+        off = (1.0 - theme::ease_out((elapsed - 0.16) / 0.32)) * self.fs(26.0);
+        y += off;
         self.heading(fr, pal, s.accent, &mut y);
         let n = theme::ACCENTS.len();
         let sw = ((lw - 2.0 * pad - (n as f32 - 1.0) * gap) / n as f32).max(k * 28.0);
@@ -2140,8 +2297,11 @@ impl MetroCalcApp {
             skc(pal.weak, 1.0),
         );
         y += self.fs(24.0 + 14.0);
+        y -= off;
 
         // data
+        off = (1.0 - theme::ease_out((elapsed - 0.24) / 0.32)) * self.fs(26.0);
+        y += off;
         self.heading(fr, pal, s.data, &mut y);
         let count_text = s.history_count.replace("{}", &self.engine.history.len().to_string());
         self.push_text(fr, &count_text, pad, y + self.fs(16.0), TextAlign::Left, self.fs(18.0), skc(pal.weak, 1.0));
@@ -2176,13 +2336,17 @@ impl MetroCalcApp {
         let path_text = s.settings_path.replace("{}", &path.to_string_lossy());
         self.push_text_ml(fr, &path_text, pad, y, TextAlign::Left, self.fs(12.0), skc(pal.weak, 1.0), lw - pad * 2.0);
         y += self.fs(30.0 + 12.0);
+        y -= off;
 
         // about
+        off = (1.0 - theme::ease_out((elapsed - 0.32) / 0.32)) * self.fs(26.0);
+        y += off;
         self.heading(fr, pal, s.version_title, &mut y);
         self.push_text(fr, s.about_line, pad, y + self.fs(14.0), TextAlign::Left, self.fs(18.0), skc(pal.text, 1.0));
         y += self.fs(32.0);
         self.push_text(fr, s.safety_line, pad, y, TextAlign::Left, self.fs(16.0), skc(pal.weak, 1.0));
         y += self.fs(30.0);
+        y -= off;
 
         self.set_content_h = y + self.fs(24.0) - top;
         fr.pop();
@@ -2436,9 +2600,10 @@ impl MetroCalcApp {
             self.cursor_icon = want;
         }
 
-        if self.animating(now) {
-            self.dirty = true;
-        }
+        // Publish animation state to the driver thread: it wakes the event loop
+        // at ~120 Hz while animations are in flight and stays silent when idle.
+        self.anim_flag
+            .store(self.animating(now), std::sync::atomic::Ordering::Relaxed);
     }
 
     // ---------- GPU init (preferred) ----------
@@ -2610,7 +2775,24 @@ impl ApplicationHandler for MetroCalcApp {
         // Timing baseline starts when the window is ready: splash → title frame → staggered tiles
         self.t0 = Instant::now();
         self.entrance_start = self.t0;
+        self.page_enter = self.t0;
         self.dirty = true;
+
+        // Animation driver thread: request_redraw() is thread-safe (winit), so a
+        // dedicated thread wakes the event loop at ~120 Hz whenever the render
+        // path reports ongoing animation. Idle → flag false → thread just
+        // sleeps, zero CPU. The thread dies with the process (never joined).
+        let flag = self.anim_flag.clone();
+        let win = self.window.clone();
+        std::thread::spawn(move || loop {
+            std::thread::sleep(Duration::from_millis(8));
+            if flag.load(std::sync::atomic::Ordering::Relaxed) {
+                if let Some(w) = win.as_ref() {
+                    w.request_redraw();
+                }
+            }
+        });
+
         if let Some(w) = &self.window {
             w.request_redraw();
         }
@@ -2636,23 +2818,32 @@ impl ApplicationHandler for MetroCalcApp {
             }
             WindowEvent::CursorMoved { position, .. } => {
                 let s = self.scale.max(1.0);
-                self.pointer = ((position.x as f32) / s, (position.y as f32) / s);
+                let (nx, ny) = ((position.x as f32) / s, (position.y as f32) / s);
+                let now_i = Instant::now();
+                let dt_e = now_i.duration_since(self.last_move).as_secs_f32().max(0.001);
                 // Drag panning (Metro-style swipe gesture): press on blank space to scroll
                 if let Some((horizontal, p0, s0)) = self.drag {
-                    let cur = if horizontal { self.pointer.0 } else { self.pointer.1 };
+                    let cur = if horizontal { nx } else { ny };
                     let d = p0 - cur;
                     if horizontal {
                         self.help_scroll = s0 + d;
                     } else {
                         match self.page {
+                            Page::Start => {
+                                self.start_scroll_y = s0 + d;
+                                // track flick velocity (EMA-smoothed) for inertia on release
+                                let v = ((self.pointer.1 - ny) / dt_e).clamp(-4000.0, 4000.0);
+                                self.start_scroll_vel = self.start_scroll_vel * 0.7 + v * 0.3;
+                            }
                             Page::Help => self.help_scroll = s0 + d,
                             Page::Settings => self.set_scroll = s0 + d,
                             Page::Calc => self.calc_scroll = s0 + d,
-                            Page::Start => {}
                         }
                     }
                 }
-                self.hover = self.hit_test(self.pointer.0, self.pointer.1).map(|r| r.key);
+                self.pointer = (nx, ny);
+                self.last_move = now_i;
+                self.hover = self.hit_test(nx, ny).map(|r| r.key);
                 self.dirty = true;
             }
             WindowEvent::CursorLeft { .. } => {
@@ -2667,7 +2858,8 @@ impl ApplicationHandler for MetroCalcApp {
                     match self.hit_test(self.pointer.0, self.pointer.1).cloned() {
                         Some(r) => {
                             self.pressed = Some(r.key);
-                            if matches!(r.act, HitAct::Calc(_)) {
+                            // Ripple feedback on every button (calc keys, start tiles, top bar)
+                            if !matches!(r.act, HitAct::SkipSplash) {
                                 let pal = self.pal();
                                 self.ripples.push(Ripple {
                                     rect: r.rect,
@@ -2692,6 +2884,8 @@ impl ApplicationHandler for MetroCalcApp {
                 }
                 ElementState::Released => {
                     self.drag = None;
+                    // cap the flick velocity that feeds start-screen inertia
+                    self.start_scroll_vel = self.start_scroll_vel.clamp(-3000.0, 3000.0);
                     if let Some(k) = self.pressed.take() {
                         if let Some(r) = self.hit_test(self.pointer.0, self.pointer.1) {
                             if r.key == k {

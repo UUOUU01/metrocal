@@ -14,6 +14,7 @@ A desktop app inspired by **Windows 8 Start Screen (Metro design language)**: fu
 - **Progressive Launch**: Splash screen with three colored squares → large title and framework appear → tiles slide in and fade in batch by batch (with animations).
 - **Large-Block Calculator**: Number keys are classic Metro solid-color tiles, edge-aligned grid; pressing triggers Win8-style "sinking tilt" with bounce and ripple; result number scrolls + accent-colored sweep; error shakes.
 - **Animation & Smoothness**: GPU backend with vertical sync; animations redraw only when needed, idle CPU ~0%; automatic fallback to Skia CPU raster when no GL environment (tested to run smoothly).
+- **More animations + multithreading**: theme/accent cross-fade, start-screen flick inertia scrolling, staggered history-panel and settings-section entrances, top-bar title crossfade, ripples on every button; a dedicated animation driver thread wakes rendering at ~120 Hz while animating, and a background writer thread owns all settings disk I/O so the UI thread never blocks.
 - **Multi-language**: One-click toggle between Simplified Chinese / English / Français (via language tile on Start screen or top bar button); number formatting adapts to language (French uses comma as decimal, non-breaking spaces for thousands).
 - **Help Documentation**: Built-in multi-language help page (F1): usage, shortcuts, settings, safety & privacy, about.
 - **Dark / Light Theme** + **8 Metro accent colors**, instant and persisted.
